@@ -8,7 +8,7 @@ from numcodecs import Blosc
 class ReaderName(str, Enum):
     """Enum for readers"""
 
-    OPENEPHYS = "openephys"
+    OPENEPHYS = "openephysbinary"
 
 
 class CompressorName(str, Enum):
