@@ -1034,9 +1034,6 @@ class TestEphysJob(unittest.TestCase):
     ):
         """Tests _compress_raw_data method with basic job"""
         self.basic_job._compress_raw_data()
-        settings1_path = DATA_DIR / "Record Node 101" / "settings.xml"
-        settings3_path = DATA_DIR / "Record Node 101" / "settings_3.xml"
-        settings6_path = DATA_DIR / "Record Node 101" / "settings_6.xml"
         mock_log_info.assert_has_calls(
             [
                 call("Clipping source data. This may take a minute."),
