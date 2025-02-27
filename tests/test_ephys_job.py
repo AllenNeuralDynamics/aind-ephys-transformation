@@ -95,7 +95,9 @@ class TestEphysJob(unittest.TestCase):
 
         etl_job = EphysCompressionJob(
             job_settings=EphysJobSettings.model_construct(
-                compressor_name="UNKNOWN"
+                input_source=Path("input_dir"),
+                output_directory=Path("output_dir"),
+                compressor_name="UNKNOWN",
             )
         )
         with self.assertRaises(Exception) as e:
@@ -1037,9 +1039,6 @@ class TestEphysJob(unittest.TestCase):
         settings6_path = DATA_DIR / "Record Node 101" / "settings_6.xml"
         mock_log_info.assert_has_calls(
             [
-                call(f"No NP-OPTO probes found in {settings1_path}"),
-                call(f"No NP-OPTO probes found in {settings3_path}"),
-                call(f"No NP-OPTO probes found in {settings6_path}"),
                 call("Clipping source data. This may take a minute."),
                 call("Finished clipping source data."),
                 call("Compressing source data."),
