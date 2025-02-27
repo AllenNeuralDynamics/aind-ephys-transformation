@@ -2,16 +2,15 @@
 
 import json
 import os
-import shutil
 import unittest
 from datetime import datetime
 from pathlib import Path
 from unittest.mock import MagicMock, call, patch
 
-from aind_data_transformation.core import JobResponse
 from numcodecs import Blosc
 from wavpack_numcodecs import WavPack
 
+from aind_data_transformation.core import JobResponse
 from aind_ephys_transformation.ephys_job import (
     EphysCompressionJob,
     EphysJobSettings,
