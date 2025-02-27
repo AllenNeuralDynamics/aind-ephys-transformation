@@ -1146,11 +1146,6 @@ class TestCheckTimeAlignment(unittest.TestCase):
             job_settings=basic_job_settings_warn
         )
 
-    @classmethod
-    def tearDownClass(cls):
-        """Cleanup any resources used in tests"""
-        shutil.rmtree(Path("output_dir_align"))
-
     def test_check_alignment(self):
         """Tests check_time_alignment returns False"""
         timestamps_ok = self.basic_job_raise._check_timestamps_alignment()
@@ -1169,7 +1164,20 @@ class TestCheckTimeAlignment(unittest.TestCase):
         )
 
     @patch("logging.warning")
-    def test_job_warning(self, mock_logger: MagicMock):
+    @patch(
+        "aind_ephys_transformation.ephys_job.EphysCompressionJob"
+        "._compress_and_write_block"
+    )
+    @patch(
+        "aind_ephys_transformation.ephys_job.EphysCompressionJob"
+        "._copy_and_clip_data"
+    )
+    def test_job_warning(
+        self,
+        mock_copy_and_clip_data: MagicMock,
+        mock_compress_raw_data: MagicMock,
+        mock_logger: MagicMock,
+    ):
         """Tests _compress_raw_data method"""
         self.basic_job_warn._compress_raw_data()
         mock_logger.assert_called_with(
