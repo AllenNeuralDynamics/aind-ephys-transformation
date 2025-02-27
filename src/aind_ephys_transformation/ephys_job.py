@@ -27,9 +27,6 @@ from aind_ephys_transformation.models import (
     ReaderName,
     RecordingBlockPrefixes,
 )
-from aind_ephys_transformation.npopto_correction import (
-    correct_np_opto_electrode_locations,
-)
 
 
 class EphysJobSettings(BasicJobSettings):
@@ -369,11 +366,6 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
 
     def _compress_raw_data(self) -> None:
         """Compresses ephys data"""
-
-        # Correct NP-opto electrode positions:
-        # correction is skipped if Neuropix-PXI version > 0.4.0
-        # It'd be nice if the original data wasn't modified.
-        correct_np_opto_electrode_locations(self.job_settings.input_source)
         # Clip the data
         logging.info("Clipping source data. This may take a minute.")
         clipped_data_path = (
