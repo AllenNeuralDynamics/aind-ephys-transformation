@@ -20,11 +20,7 @@ from aind_ephys_transformation.models import CompressorName
 
 TEST_DIR = Path(os.path.dirname(os.path.realpath(__file__))) / "resources"
 DATA_DIR = TEST_DIR / "v0.6.x_neuropixels_multiexp_multistream"
-<<<<<<< HEAD
-=======
 FAKE_HARP_DIR = TEST_DIR / "v0.6.x_neuropixels_fake_harp"
-NP_OPTO_CORRECT_DIR = TEST_DIR / "np_opto_corrections"
->>>>>>> e824352875cae242d47afc1e71c5e7900452b117
 
 
 class TestEphysJob(unittest.TestCase):
