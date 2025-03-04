@@ -18,11 +18,9 @@ dynamic = ["version"]
 
 dependencies = [
     'aind-data-transformation>=0.0.18',
-    'spikeinterface[full]>=0.101.0',
-    'probeinterface==0.2.24',
-    'wavpack-numcodecs>=0.1.3,<=0.1.5',
-    'zarr==2.16.1',
-    'numcodecs==0.11.0'
+    'spikeinterface[full]>=0.102.0',
+    'probeinterface>=0.2.24',
+    'wavpack-numcodecs>=0.2.2',
 ]
 
 [project.optional-dependencies]

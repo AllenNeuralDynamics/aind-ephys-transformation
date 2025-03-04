@@ -7,10 +7,10 @@ from datetime import datetime
 from pathlib import Path
 from unittest.mock import MagicMock, call, patch
 
-from aind_data_transformation.core import JobResponse
 from numcodecs import Blosc
 from wavpack_numcodecs import WavPack
 
+from aind_data_transformation.core import JobResponse
 from aind_ephys_transformation.ephys_job import (
     EphysCompressionJob,
     EphysJobSettings,
@@ -20,6 +20,11 @@ from aind_ephys_transformation.models import CompressorName
 
 TEST_DIR = Path(os.path.dirname(os.path.realpath(__file__))) / "resources"
 DATA_DIR = TEST_DIR / "v0.6.x_neuropixels_multiexp_multistream"
+<<<<<<< HEAD
+=======
+FAKE_HARP_DIR = TEST_DIR / "v0.6.x_neuropixels_fake_harp"
+NP_OPTO_CORRECT_DIR = TEST_DIR / "np_opto_corrections"
+>>>>>>> e824352875cae242d47afc1e71c5e7900452b117
 
 
 class TestEphysJob(unittest.TestCase):
@@ -92,7 +97,6 @@ class TestEphysJob(unittest.TestCase):
 
     def test_get_compressor_error(self):
         """Tests _get_compressor_default method with unknown compressor."""
-
         etl_job = EphysCompressionJob(
             job_settings=EphysJobSettings.model_construct(
                 input_source=Path("input_dir"),
@@ -1106,6 +1110,73 @@ class TestEphysJob(unittest.TestCase):
         )
         self.assertEqual(expected_job_response, job_response)
         mock_compress_raw_data.assert_called_once()
+
+
+class TestCheckTimeAlignment(unittest.TestCase):
+    """Tests time alignment check"""
+
+    @classmethod
+    def setUpClass(cls):
+        """Setup basic job settings and job that can be used across tests."""
+        basic_job_settings_raise = EphysJobSettings(
+            input_source=FAKE_HARP_DIR,
+            output_directory=Path("output_dir_align"),
+            compress_job_save_kwargs={"n_jobs": 1},
+        )
+        cls.basic_job_settings_raise = basic_job_settings_raise
+        cls.basic_job_raise = EphysCompressionJob(
+            job_settings=basic_job_settings_raise
+        )
+
+        basic_job_settings_warn = EphysJobSettings(
+            input_source=FAKE_HARP_DIR,
+            output_directory=Path("output_dir_align"),
+            compress_job_save_kwargs={"n_jobs": 1},
+            check_timestamps=False,
+        )
+        cls.basic_job_settings_warn = basic_job_settings_warn
+        cls.basic_job_warn = EphysCompressionJob(
+            job_settings=basic_job_settings_warn
+        )
+
+    def test_check_alignment(self):
+        """Tests check_time_alignment returns False"""
+        timestamps_ok = self.basic_job_raise._check_timestamps_alignment()
+        self.assertFalse(timestamps_ok)
+
+    def test_job_failure(self):
+        """Tests _compress_raw_data method"""
+        with self.assertRaises(Exception) as e:
+            self.basic_job_raise._compress_raw_data()
+        self.assertEqual(
+            (
+                "Timestamps are not aligned. Please align timestamps "
+                "using aind-ephys-rig-qc before compressing the data.",
+            ),
+            e.exception.args,
+        )
+
+    @patch("logging.warning")
+    @patch(
+        "aind_ephys_transformation.ephys_job.EphysCompressionJob"
+        "._compress_and_write_block"
+    )
+    @patch(
+        "aind_ephys_transformation.ephys_job.EphysCompressionJob"
+        "._copy_and_clip_data"
+    )
+    def test_job_warning(
+        self,
+        mock_copy_and_clip_data: MagicMock,
+        mock_compress_raw_data: MagicMock,
+        mock_logger: MagicMock,
+    ):
+        """Tests _compress_raw_data method"""
+        self.basic_job_warn._compress_raw_data()
+        mock_logger.assert_called_with(
+            "Timestamps are not aligned, but timestamps check is "
+            "disabled. Proceeding with compression.",
+        )
 
 
 if __name__ == "__main__":

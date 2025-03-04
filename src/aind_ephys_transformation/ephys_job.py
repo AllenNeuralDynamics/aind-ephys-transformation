@@ -42,6 +42,13 @@ class EphysJobSettings(BasicJobSettings):
         description="Number of frames to clip the data.",
         title="Clip N Frames",
     )
+    # Check timestamps alignment
+    check_timestamps: bool = Field(
+        default=True,
+        description="Check if timestamps are aligned and raise an error if "
+        "they are not.",
+        title="Check Timestamps",
+    )
     # Compress settings
     random_seed: Optional[int] = 0
     compress_write_output_format: Literal["zarr"] = Field(
@@ -179,6 +186,36 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
                 ),
                 "n_chan": n_chan,
             }
+
+    def _check_timestamps_alignment(self) -> bool:
+        """
+        Check if timestamps have been HARP aligned.
+        This is done by checking if there are any original_timestamps.npy files
+        in the openephys folder, when the `raw.harp` folder is present.
+
+        Returns
+        -------
+        bool
+          True if timestamps are aligned, False otherwise.
+        """
+        openephys_folder = self.job_settings.input_source
+
+        # Look for raw.harp folder
+        harp_folders = [
+            p for p in self.job_settings.input_source.glob("**/raw.harp/")
+        ]
+        has_harp = len(harp_folders) == 1
+
+        # Check if original_timestamps.npy files are present
+        original_timestamps = [
+            p for p in openephys_folder.glob("**/original_timestamps.npy")
+        ]
+
+        if has_harp and len(original_timestamps) == 0:
+            alignment_ok = False
+        else:
+            alignment_ok = True
+        return alignment_ok
 
     def _get_compressor(self) -> Union[Blosc, WavPack]:
         """
@@ -366,6 +403,7 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
 
     def _compress_raw_data(self) -> None:
         """Compresses ephys data"""
+
         # Clip the data
         logging.info("Clipping source data. This may take a minute.")
         clipped_data_path = (
