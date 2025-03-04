@@ -28,10 +28,6 @@ from aind_ephys_transformation.models import (
     RecordingBlockPrefixes,
 )
 
-from aind_ephys_transformation.npopto_correction import (
-    correct_np_opto_electrode_locations,
-)
-
 
 class EphysJobSettings(BasicJobSettings):
     """EphysCompressionJob settings."""
@@ -421,10 +417,6 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
                     "Timestamps are not aligned, but timestamps check is "
                     "disabled. Proceeding with compression."
                 )
-        # Correct NP-opto electrode positions:
-        # correction is skipped if Neuropix-PXI version > 0.4.0
-        # It'd be nice if the original data wasn't modified.
-        correct_np_opto_electrode_locations(self.job_settings.input_source)
 
         # Clip the data
         logging.info("Clipping source data. This may take a minute.")

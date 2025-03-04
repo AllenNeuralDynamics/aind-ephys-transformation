@@ -16,15 +16,11 @@ from aind_ephys_transformation.ephys_job import (
     EphysJobSettings,
 )
 from aind_ephys_transformation.models import CompressorName
-from aind_ephys_transformation.npopto_correction import (
-    correct_np_opto_electrode_locations,
-    get_standard_np_opto_electrode_positions,
-)
+
 
 TEST_DIR = Path(os.path.dirname(os.path.realpath(__file__))) / "resources"
 DATA_DIR = TEST_DIR / "v0.6.x_neuropixels_multiexp_multistream"
 FAKE_HARP_DIR = TEST_DIR / "v0.6.x_neuropixels_fake_harp"
-NP_OPTO_CORRECT_DIR = TEST_DIR / "np_opto_corrections"
 
 
 class TestEphysJob(unittest.TestCase):
@@ -1038,14 +1034,8 @@ class TestEphysJob(unittest.TestCase):
     ):
         """Tests _compress_raw_data method with basic job"""
         self.basic_job._compress_raw_data()
-        settings1_path = DATA_DIR / "Record Node 101" / "settings.xml"
-        settings3_path = DATA_DIR / "Record Node 101" / "settings_3.xml"
-        settings6_path = DATA_DIR / "Record Node 101" / "settings_6.xml"
         mock_log_info.assert_has_calls(
             [
-                call(f"No NP-OPTO probes found in {settings1_path}"),
-                call(f"No NP-OPTO probes found in {settings3_path}"),
-                call(f"No NP-OPTO probes found in {settings6_path}"),
                 call("Clipping source data. This may take a minute."),
                 call("Finished clipping source data."),
                 call("Compressing source data."),
@@ -1183,110 +1173,6 @@ class TestCheckTimeAlignment(unittest.TestCase):
             "Timestamps are not aligned, but timestamps check is "
             "disabled. Proceeding with compression.",
         )
-
-
-class TestNpOptoCorrection(unittest.TestCase):
-    """Tests npopto_corrections module"""
-
-    @classmethod
-    def setUpClass(cls):
-        """Read in the standard positions."""
-        with open(NP_OPTO_CORRECT_DIR / "standard_positions.json", "r") as f:
-            standard_positions = json.load(f)
-        cls.standard_positions = standard_positions
-
-    def test_get_standard_np_opto_electrode_positions(self):
-        """Tests get_standard_np_opto_electrode_positions class"""
-        output = get_standard_np_opto_electrode_positions()
-        self.assertEqual(self.standard_positions, list(output))
-
-    @patch("xml.etree.ElementTree.ElementTree.write")
-    @patch("pathlib.Path.rename")
-    @patch("logging.info")
-    def test_no_pxi_in_xml_file(
-        self,
-        mock_log_info: MagicMock,
-        mock_rename: MagicMock,
-        mock_write: MagicMock,
-    ):
-        """Tests correct_np_opto_electrode_locations method when no
-        Neuropix-PXI is found in xml file"""
-        correct_np_opto_electrode_locations(
-            input_dir=NP_OPTO_CORRECT_DIR / "settings_altered_no_pxi"
-        )
-        mock_log_info.assert_not_called()
-        mock_rename.assert_not_called()
-        mock_write.assert_not_called()
-
-    @patch("xml.etree.ElementTree.ElementTree.write")
-    @patch("pathlib.Path.rename")
-    @patch("logging.info")
-    def test_corrections_no_np_opto_probes_found(
-        self,
-        mock_log_info: MagicMock,
-        mock_rename: MagicMock,
-        mock_write: MagicMock,
-    ):
-        """Tests correct_np_opto_electrode_locations method when no np_opto
-        probes are found"""
-        settings_dir = NP_OPTO_CORRECT_DIR / "settings_2023_04"
-        correct_np_opto_electrode_locations(input_dir=settings_dir)
-        mock_log_info.assert_called_once_with(
-            f"No NP-OPTO probes found in {settings_dir / 'settings.xml'}"
-        )
-        mock_rename.assert_not_called()
-        mock_write.assert_not_called()
-
-    @patch("xml.etree.ElementTree.ElementTree.write")
-    @patch("pathlib.Path.rename")
-    @patch("logging.info")
-    def test_corrections_v_0_4_1(
-        self,
-        mock_log_info: MagicMock,
-        mock_rename: MagicMock,
-        mock_write: MagicMock,
-    ):
-        """Tests correct_np_opto_electrode_locations method when the
-        neuropixel version is 0.4.1"""
-        correct_np_opto_electrode_locations(
-            input_dir=NP_OPTO_CORRECT_DIR / "settings_2024_01"
-        )
-        mock_log_info.assert_not_called()
-        mock_rename.assert_not_called()
-        mock_write.assert_not_called()
-
-    @patch("xml.etree.ElementTree.ElementTree.write")
-    @patch("pathlib.Path.rename")
-    @patch("logging.info")
-    def test_needs_corrections(
-        self,
-        mock_log_info: MagicMock,
-        mock_rename: MagicMock,
-        mock_write: MagicMock,
-    ):
-        """Tests correct_np_opto_electrode_locations method when the
-        neuropixel version is 0.4.0"""
-        settings_dir = NP_OPTO_CORRECT_DIR / "settings_2022_07"
-        correct_np_opto_electrode_locations(
-            input_dir=NP_OPTO_CORRECT_DIR / "settings_2022_07"
-        )
-        mock_log_info.assert_has_calls(
-            [
-                call("Found NP-OPTO!"),
-                call(
-                    f"Renaming wrong NP-OPTO settings file as "
-                    f'{settings_dir / "settings.xml.wrong"}'
-                ),
-                call(
-                    f"Saving correct NP-OPTO settings file as "
-                    f'{settings_dir / "settings.xml"}'
-                ),
-            ]
-        )
-        mock_rename.assert_called_once_with(
-            settings_dir / "settings.xml.wrong"
-        )
-        mock_write.assert_called_once_with(str(settings_dir / "settings.xml"))
 
 
 if __name__ == "__main__":
