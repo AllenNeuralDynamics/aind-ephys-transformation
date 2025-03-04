@@ -403,6 +403,20 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
 
     def _compress_raw_data(self) -> None:
         """Compresses ephys data"""
+        # Check if timestamps are aligned
+        logging.info("Checking timestamps alignment.")
+        timestamps_ok = self._check_timestamps_alignment()
+        if not timestamps_ok:
+            if self.job_settings.check_timestamps:
+                raise Exception(
+                    "Timestamps are not aligned. Please align timestamps "
+                    "using aind-ephys-rig-qc before compressing the data."
+                )
+            else:
+                logging.warning(
+                    "Timestamps are not aligned, but timestamps check is "
+                    "disabled. Proceeding with compression."
+                )
 
         # Clip the data
         logging.info("Clipping source data. This may take a minute.")
