@@ -189,9 +189,9 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
 
     def _check_timestamps_alignment(self) -> bool:
         """
-        Check if timestamps have been HARP aligned.
+        Check if timestamps have been aligned.
         This is done by checking if there are any original_timestamps.npy files
-        in the openephys folder, when the `raw.harp` folder is present.
+        in the openephys folder.
 
         Returns
         -------
@@ -200,22 +200,15 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
         """
         openephys_folder = self.job_settings.input_source
 
-        # Look for raw.harp folder
-        harp_folders = [
-            p for p in self.job_settings.input_source.glob("**/raw.harp/")
-        ]
-        has_harp = len(harp_folders) == 1
-
         # Check if original_timestamps.npy files are present
         original_timestamps = [
             p for p in openephys_folder.glob("**/original_timestamps.npy")
         ]
 
-        if has_harp and len(original_timestamps) == 0:
-            alignment_ok = False
+        if len(original_timestamps) == 0:
+            return False
         else:
-            alignment_ok = True
-        return alignment_ok
+            return True
 
     def _get_compressor(self) -> Union[Blosc, WavPack]:
         """
