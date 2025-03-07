@@ -20,7 +20,7 @@ from aind_ephys_transformation.models import CompressorName
 
 TEST_DIR = Path(os.path.dirname(os.path.realpath(__file__))) / "resources"
 DATA_DIR = TEST_DIR / "v0.6.x_neuropixels_multiexp_multistream"
-FAKE_HARP_DIR = TEST_DIR / "v0.6.x_neuropixels_fake_harp"
+DATA_DIR_NOT_ALIGNED = TEST_DIR / "v0.6.x_neuropixels_not_aligned"
 
 
 class TestEphysJob(unittest.TestCase):
@@ -1115,7 +1115,7 @@ class TestCheckTimeAlignment(unittest.TestCase):
     def setUpClass(cls):
         """Setup basic job settings and job that can be used across tests."""
         basic_job_settings_raise = EphysJobSettings(
-            input_source=FAKE_HARP_DIR,
+            input_source=DATA_DIR_NOT_ALIGNED,
             output_directory=Path("output_dir_align"),
             compress_job_save_kwargs={"n_jobs": 1},
         )
@@ -1125,7 +1125,7 @@ class TestCheckTimeAlignment(unittest.TestCase):
         )
 
         basic_job_settings_warn = EphysJobSettings(
-            input_source=FAKE_HARP_DIR,
+            input_source=DATA_DIR_NOT_ALIGNED,
             output_directory=Path("output_dir_align"),
             compress_job_save_kwargs={"n_jobs": 1},
             check_timestamps=False,
