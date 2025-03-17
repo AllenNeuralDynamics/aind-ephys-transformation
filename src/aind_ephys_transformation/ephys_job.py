@@ -204,8 +204,14 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
         original_timestamps = [
             p for p in openephys_folder.glob("**/original_timestamps.npy")
         ]
+        adjusted_timestamps_flag = [
+            p for p in openephys_folder.glob("**/TIMESTAMPS_ADJUSTED.flag")
+        ]
 
-        if len(original_timestamps) == 0:
+        if (
+            len(original_timestamps) == 0
+            and len(adjusted_timestamps_flag) == 0
+        ):
             return False
         else:
             return True
