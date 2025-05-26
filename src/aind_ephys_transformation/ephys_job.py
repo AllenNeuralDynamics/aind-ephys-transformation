@@ -5,12 +5,12 @@ import os
 import platform
 import shutil
 import sys
+import json
 from datetime import datetime
 from pathlib import Path
 from typing import Iterator, Literal, Optional, Union
 
 import numpy as np
-import spikeinterface.preprocessing as spre
 from aind_data_transformation.core import (
     BasicJobSettings,
     GenericEtl,
@@ -19,7 +19,12 @@ from aind_data_transformation.core import (
 )
 from numcodecs import Blosc
 from pydantic import Field
+
+import probeinterface as pi
+import spikeinterface as si
 from spikeinterface import extractors as se
+import spikeinterface.preprocessing as spre
+
 from wavpack_numcodecs import WavPack
 
 from aind_ephys_transformation.models import (
@@ -115,41 +120,80 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
             ('recording', 'experiment_name', 'stream_name')
 
         """
-        nblocks = se.get_neo_num_blocks(
-            self.job_settings.reader_name.value, self.job_settings.input_source
-        )
-        stream_names, stream_ids = se.get_neo_streams(
-            self.job_settings.reader_name.value, self.job_settings.input_source
-        )
-        # load first stream to map block_indices to experiment_names
-        rec_test = se.read_openephys(
-            self.job_settings.input_source,
-            block_index=0,
-            stream_name=stream_names[0],
-        )
-        record_node = list(rec_test.neo_reader.folder_structure.keys())[0]
-        experiments = rec_test.neo_reader.folder_structure[record_node][
-            "experiments"
-        ]
-        exp_ids = list(experiments.keys())
-        experiment_names = [
-            experiments[exp_id]["name"] for exp_id in sorted(exp_ids)
-        ]
-        for block_index in range(nblocks):
-            for stream_name in stream_names:
-                rec = se.read_openephys(
-                    self.job_settings.input_source,
-                    stream_name=stream_name,
-                    block_index=block_index,
-                    load_sync_timestamps=True,
-                )
+        if self.job_settings.reader_name == ReaderName.CHRONIC:
+            dataset_folder = Path(self.job_settings.input_source) / "ecephys"
+            onix_folders = [p for p in dataset_folder.iterdir() if p.is_dir() and "OnixEphys" in p.name]
+            assert len(onix_folders) == 1
+            onix_folder = onix_folders[0]
+
+            stream_name = "AmplifierData"
+            amplifier_datasets = [p for p in onix_folder.iterdir() if stream_name in p.name and p.suffix == ".bin"]
+
+            probe_json = dataset_folder / "probe.json"
+            binary_info_json = dataset_folder / "binary_info.json"
+
+            probe_group = pi.read_probeinterface(probe_json)
+
+            with open(binary_info_json) as f:
+                binary_info = json.load(f)
+
+            adc_depth = binary_info.pop("adc_depth")
+
+            # sort dates
+            dates = [p.stem.split("_")[-1] for p in amplifier_datasets]
+
+            for date in dates:
+                amp_data = [p for p in amplifier_datasets if date in p.name][0]
+
+                recording = si.read_binary(amp_data, **binary_info)
+                recording = recording.set_probegroup(probe_group, group_mode="by_shank")
+
+                # unsigned to signed
+                rec = spre.unsigned_to_signed(recording, bit_depth=adc_depth)
+
                 yield (
                     {
                         "recording": rec,
-                        "experiment_name": experiment_names[block_index],
+                        "experiment_name": date,
                         "stream_name": stream_name,
                     }
                 )
+        elif self.job_settings.reader_name == ReaderName.OPENEPHYS:
+            nblocks = se.get_neo_num_blocks(
+                self.job_settings.reader_name.value, self.job_settings.input_source
+            )
+            stream_names, _ = se.get_neo_streams(
+                self.job_settings.reader_name.value, self.job_settings.input_source
+            )
+            # load first stream to map block_indices to experiment_names
+            rec_test = se.read_openephys(
+                self.job_settings.input_source,
+                block_index=0,
+                stream_name=stream_names[0],
+            )
+            record_node = list(rec_test.neo_reader.folder_structure.keys())[0]
+            experiments = rec_test.neo_reader.folder_structure[record_node][
+                "experiments"
+            ]
+            exp_ids = list(experiments.keys())
+            experiment_names = [
+                experiments[exp_id]["name"] for exp_id in sorted(exp_ids)
+            ]
+            for block_index in range(nblocks):
+                for stream_name in stream_names:
+                    rec = se.read_openephys(
+                        self.job_settings.input_source,
+                        stream_name=stream_name,
+                        block_index=block_index,
+                        load_sync_timestamps=True,
+                    )
+                    yield (
+                        {
+                            "recording": rec,
+                            "experiment_name": experiment_names[block_index],
+                            "stream_name": stream_name,
+                        }
+                    )
 
     def _get_streams_to_clip(self) -> Iterator[dict]:
         """
@@ -161,31 +205,56 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
           The 'data' is a numpy.memmap object.
 
         """
-        stream_names, stream_ids = se.get_neo_streams(
-            self.job_settings.reader_name.value, self.job_settings.input_source
-        )
-        for dat_file in self.job_settings.input_source.glob("**/*.dat"):
-            oe_stream_name = dat_file.parent.name
-            si_stream_name = [
-                stream_name
-                for stream_name in stream_names
-                if oe_stream_name in stream_name
-            ][0]
-            n_chan = se.read_openephys(
-                self.job_settings.input_source,
-                block_index=0,
-                stream_name=si_stream_name,
-            ).get_num_channels()
-            data = np.memmap(
-                filename=str(dat_file), dtype="int16", order="C", mode="r"
-            ).reshape(-1, n_chan)
-            yield {
-                "data": data,
-                "relative_path_name": str(
-                    dat_file.relative_to(self.job_settings.input_source)
-                ),
-                "n_chan": n_chan,
-            }
+        if self.job_settings.reader_name == ReaderName.CHRONIC:
+            # Chronic data does not have .dat files, so we return an empty iterator
+            amplifier_data_files = self.job_settings.input_source.glob("**/*AmplifierData*.bin")
+            dataset_folder = Path(self.job_settings.input_source) / "ecephys"
+            binary_info_json = dataset_folder / "binary_info.json"
+            with open(binary_info_json) as f:
+                binary_info = json.load(f)
+            dtype = binary_info.get("dtype", "uint16")
+            order = "C" if binary_info.get("time_axis", 0) == 0 else "F"
+            n_chan = binary_info.get("num_channels", 384)
+            for amp_data_file in amplifier_data_files:
+                data = np.memmap(
+                    filename=str(amp_data_file),
+                    dtype=dtype,
+                    order=order,
+                    mode="r",
+                ).reshape(-1, n_chan)
+                yield {
+                    "data": data,
+                    "relative_path_name": str(
+                        amp_data_file.relative_to(self.job_settings.input_source)
+                    ),
+                    "n_chan": n_chan,
+                }
+        else:
+            stream_names, _ = se.get_neo_streams(
+                self.job_settings.reader_name.value, self.job_settings.input_source
+            )
+            for dat_file in self.job_settings.input_source.glob("**/*.dat"):
+                oe_stream_name = dat_file.parent.name
+                si_stream_name = [
+                    stream_name
+                    for stream_name in stream_names
+                    if oe_stream_name in stream_name
+                ][0]
+                n_chan = se.read_openephys(
+                    self.job_settings.input_source,
+                    block_index=0,
+                    stream_name=si_stream_name,
+                ).get_num_channels()
+                data = np.memmap(
+                    filename=str(dat_file), dtype="int16", order="C", mode="r"
+                ).reshape(-1, n_chan)
+                yield {
+                    "data": data,
+                    "relative_path_name": str(
+                        dat_file.relative_to(self.job_settings.input_source)
+                    ),
+                    "n_chan": n_chan,
+                }
 
     def _check_timestamps_alignment(self) -> bool:
         """
@@ -198,6 +267,14 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
         bool
           True if timestamps are aligned, False otherwise.
         """
+        if self.job_settings.reader_name == ReaderName.CHRONIC:
+            # Chronic data does not have timestamps, so we return True
+            return True
+        else:
+            # OpenEphys data has timestamps, so we check for them
+            return self._check_openephys_timestamps()
+
+    def _check_openephys_timestamps(self) -> bool:
         openephys_folder = self.job_settings.input_source
 
         # Check if original_timestamps.npy files are present
@@ -237,8 +314,8 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
                 f"{[c for c in CompressorName]}"
             )
 
-    @staticmethod
     def _scale_read_blocks(
+        self,
         read_blocks: Iterator[dict],
         random_seed: Optional[int] = None,
         num_chunks_per_segment: int = 100,
@@ -314,7 +391,12 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
         """
 
         # first: copy everything except .dat files
-        patterns_to_ignore = ["*.dat"]
+        if self.job_settings.reader_name == ReaderName.CHRONIC:
+            # Chronic data does not have .dat files, so we copy everything
+            # except the .dat files
+            patterns_to_ignore = ["*AmplifierData*.bin"]
+        elif self.job_settings.reader_name == ReaderName.OPENEPHYS:
+            patterns_to_ignore = ["*.dat"]
         shutil.copytree(
             self.job_settings.input_source,
             dst_dir,
@@ -335,8 +417,8 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
             )
             dst_data[:] = data[: self.job_settings.clip_n_frames]
 
-    @staticmethod
     def _compress_and_write_block(
+        self,
         read_blocks: Iterator[dict],
         compressor: Union[WavPack, Blosc],
         output_dir: Path,
@@ -428,7 +510,7 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
             stream_gen=streams_to_clip,
         )
 
-        logging.info("Finished clipping source data.")
+        logging.info("Finished copying and clipping source data.")
 
         # Compress the data
         logging.info("Compressing source data.")
@@ -437,14 +519,19 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
         )
         read_blocks = self._get_read_blocks()
         compressor = self._get_compressor()
-        scaled_read_blocks = self._scale_read_blocks(
-            read_blocks=read_blocks,
-            random_seed=self.job_settings.random_seed,
-            num_chunks_per_segment=(
-                self.job_settings.scale_num_chunks_per_segment
-            ),
-            chunk_size=self.job_settings.scale_chunk_size,
-        )
+        if self.job_settings.reader_name == ReaderName.CHRONIC:
+            # No need to scale the Chronic Onix recordings
+            scaled_read_blocks = read_blocks
+        elif self.job_settings.reader_name == ReaderName.OPENEPHYS:
+            # Scale the OpenEphys recordings
+            scaled_read_blocks = self._scale_read_blocks(
+                read_blocks=read_blocks,
+                random_seed=self.job_settings.random_seed,
+                num_chunks_per_segment=(
+                    self.job_settings.scale_num_chunks_per_segment
+                ),
+                chunk_size=self.job_settings.scale_chunk_size,
+            )
         self._compress_and_write_block(
             read_blocks=scaled_read_blocks,
             compressor=compressor,
