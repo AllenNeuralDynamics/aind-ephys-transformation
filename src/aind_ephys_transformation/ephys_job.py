@@ -119,7 +119,7 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
 
         """
         if self.job_settings.reader_name == ReaderName.CHRONIC:
-            dataset_folder = Path(self.job_settings.input_source) / "ecephys"
+            dataset_folder = Path(self.job_settings.input_source)
             onix_folders = [p for p in dataset_folder.iterdir() if p.is_dir() and "OnixEphys" in p.name]
             assert len(onix_folders) == 1
             onix_folder = onix_folders[0]
