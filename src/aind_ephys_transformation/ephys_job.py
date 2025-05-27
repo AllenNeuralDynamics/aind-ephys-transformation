@@ -206,7 +206,7 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
         if self.job_settings.reader_name == ReaderName.CHRONIC:
             # Chronic data does not have .dat files, so we return an empty iterator
             amplifier_data_files = self.job_settings.input_source.glob("**/*AmplifierData*.bin")
-            dataset_folder = Path(self.job_settings.input_source) / "ecephys"
+            dataset_folder = Path(self.job_settings.input_source)
             binary_info_json = dataset_folder / "binary_info.json"
             with open(binary_info_json) as f:
                 binary_info = json.load(f)
