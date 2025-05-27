@@ -540,10 +540,8 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
         )
         read_blocks = self._get_read_blocks()
         compressor = self._get_compressor()
-        if self.job_settings.reader_name == ReaderName.CHRONIC:
-            # No need to scale the Chronic Onix recordings
-            scaled_read_blocks = read_blocks
-        elif self.job_settings.reader_name == ReaderName.OPENEPHYS:
+        # No need to scale the Chronic Onix recordings, only Open Ephys
+        if self.job_settings.reader_name == ReaderName.OPENEPHYS:
             # Scale the OpenEphys recordings
             scaled_read_blocks = self._scale_read_blocks(
                 read_blocks=read_blocks,

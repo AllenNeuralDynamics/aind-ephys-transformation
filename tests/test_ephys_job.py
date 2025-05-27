@@ -17,10 +17,10 @@ from aind_ephys_transformation.ephys_job import (
 )
 from aind_ephys_transformation.models import CompressorName
 
-
 TEST_DIR = Path(os.path.dirname(os.path.realpath(__file__))) / "resources"
-DATA_DIR = TEST_DIR / "v0.6.x_neuropixels_multiexp_multistream"
-DATA_DIR_NOT_ALIGNED = TEST_DIR / "v0.6.x_neuropixels_not_aligned"
+OE_DATA_DIR = TEST_DIR / "v0.6.x_neuropixels_multiexp_multistream"
+OE_DATA_DIR_NOT_ALIGNED = TEST_DIR / "v0.6.x_neuropixels_not_aligned"
+CHRONIC_DATA_DIR = TEST_DIR / "chronic-test-data"
 
 
 class TestEphysJob(unittest.TestCase):
@@ -30,7 +30,7 @@ class TestEphysJob(unittest.TestCase):
     def setUpClass(cls):
         """Setup basic job settings and job that can be used across tests"""
         basic_job_settings = EphysJobSettings(
-            input_source=DATA_DIR,
+            input_source=OE_DATA_DIR,
             output_directory=Path("output_dir"),
             compress_job_save_kwargs={"n_jobs": 1},
         )
@@ -472,7 +472,7 @@ class TestEphysJob(unittest.TestCase):
         )
         mock_ignore_patterns.assert_called_once_with("*.dat")
         mock_copy_tree.assert_called_once_with(
-            DATA_DIR, Path("."), ignore=["*.dat"]
+            OE_DATA_DIR, Path("."), ignore=["*.dat"]
         )
         mock_memmap.assert_has_calls(expected_memmap_calls)
 
@@ -1036,8 +1036,9 @@ class TestEphysJob(unittest.TestCase):
         self.basic_job._compress_raw_data()
         mock_log_info.assert_has_calls(
             [
+                call("Checking timestamps alignment."),
                 call("Clipping source data. This may take a minute."),
-                call("Finished clipping source data."),
+                call("Finished copying and clipping source data."),
                 call("Compressing source data."),
                 call("Finished compressing source data."),
             ],
@@ -1115,7 +1116,7 @@ class TestCheckTimeAlignment(unittest.TestCase):
     def setUpClass(cls):
         """Setup basic job settings and job that can be used across tests."""
         basic_job_settings_raise = EphysJobSettings(
-            input_source=DATA_DIR_NOT_ALIGNED,
+            input_source=OE_DATA_DIR_NOT_ALIGNED,
             output_directory=Path("output_dir_align"),
             compress_job_save_kwargs={"n_jobs": 1},
         )
@@ -1125,7 +1126,7 @@ class TestCheckTimeAlignment(unittest.TestCase):
         )
 
         basic_job_settings_warn = EphysJobSettings(
-            input_source=DATA_DIR_NOT_ALIGNED,
+            input_source=OE_DATA_DIR_NOT_ALIGNED,
             output_directory=Path("output_dir_align"),
             compress_job_save_kwargs={"n_jobs": 1},
             check_timestamps=False,
@@ -1172,6 +1173,184 @@ class TestCheckTimeAlignment(unittest.TestCase):
         mock_logger.assert_called_with(
             "Timestamps are not aligned, but timestamps check is "
             "disabled. Proceeding with compression.",
+        )
+
+
+class TestChronicCompressJob(unittest.TestCase):
+    """Tests for the EphysCompressionJob with a chronic compress job"""
+
+    @classmethod
+    def setUpClass(cls):
+        """Setup basic job settings and job that can be used across tests"""
+        chronic_job_settings = EphysJobSettings(
+            input_source=CHRONIC_DATA_DIR,
+            output_directory=Path("output_dir_chronic"),
+            compress_job_save_kwargs={"n_jobs": 1},
+            reader_name="chronic",
+        )
+        cls.chronic_job_settings = chronic_job_settings
+        cls.chronic_job = EphysCompressionJob(
+            job_settings=chronic_job_settings
+        )
+
+    def test_get_read_blocks(self):
+        """Tests _get_read_blocks method"""
+        read_blocks = self.chronic_job._get_read_blocks()
+        # Instead of constructing OpenEphysBinaryRecordingExtractor to
+        # compare against, we can just compare the repr of the classes
+        read_blocks_repr = []
+        for read_block in read_blocks:
+            copied_read_block = read_block
+            copied_read_block["recording"] = repr(read_block["recording"])
+            read_blocks_repr.append(copied_read_block)
+        extractor_str = (
+            "UnsignedToSignedRecording: 384 channels - 30.0kHz - 1 segments "
+            "- 100 samples - 0.00s (3.33 ms) \n                           "
+            "int16 dtype - 75.00 KiB"
+        )
+        expected_read_blocks = [
+            {
+                "recording": extractor_str,
+                "experiment_name": "2025-05-13T19-00-00",
+                "stream_name": "AmplifierData",
+            }
+        ]
+        expected_scaled_read_blocks_str = set(
+            [json.dumps(o) for o in expected_read_blocks]
+        )
+        read_blocks_repr_str = set([json.dumps(o) for o in read_blocks_repr])
+        self.assertEqual(expected_scaled_read_blocks_str, read_blocks_repr_str)
+
+    def test_get_streams_to_clip(self):
+        """Tests _get_streams_to_clip method"""
+        streams_to_clip = self.chronic_job._get_streams_to_clip()
+        # TODO: If we want finer granularity, we can compare the numpy.memmap
+        #  directly instead of just checking their shape
+        streams_to_clip_just_shape = []
+        for stream_to_clip in streams_to_clip:
+            stream_to_clip_copy = {
+                "relative_path_name": stream_to_clip["relative_path_name"],
+                "n_chan": stream_to_clip["n_chan"],
+                "data": stream_to_clip["data"].shape,
+            }
+            streams_to_clip_just_shape.append(stream_to_clip_copy)
+
+        expected_output = [
+            {
+                "relative_path_name": str(
+                    "OnixEphys/OnixEphys_AmplifierData_2025-05-13T19-00-00.bin"
+                ),
+                "n_chan": 384,
+                "data": (100, 384),
+            }
+        ]
+        expected_output_str = set([json.dumps(o) for o in expected_output])
+        streams_to_clip_just_shape_str = set(
+            [json.dumps(o) for o in streams_to_clip_just_shape]
+        )
+        self.assertEqual(expected_output_str, streams_to_clip_just_shape_str)
+
+    @patch("shutil.copytree")
+    @patch("shutil.ignore_patterns")
+    @patch("numpy.memmap")
+    def test_copy_and_clip_data(
+        self,
+        mock_memmap: MagicMock,
+        mock_ignore_patterns: MagicMock,
+        mock_copy_tree: MagicMock,
+    ):
+        """Tests _copy_and_clip_data method"""
+        mock_ignore_patterns.return_value = ["*AmplifierData*.bin"]
+
+        expected_output = [
+            {
+                "relative_path_name": str(
+                    "OnixEphys/OnixEphys_AmplifierData_2025-05-13T19-00-00.bin"
+                ),
+                "n_chan": 384,
+                "data": (100, 384),
+            }
+        ]
+        expected_memmap_calls = []
+        for foobar in expected_output:
+            expected_memmap_calls.append(
+                call(
+                    filename=Path(foobar["relative_path_name"]),
+                    dtype="int16",
+                    shape=foobar["data"],
+                    order="C",
+                    mode="w+",
+                )
+            )
+            expected_memmap_calls.append(
+                call().__setitem__(slice(None, None, None), foobar["data"])
+            )
+        self.chronic_job._copy_and_clip_data(
+            dst_dir=Path("."), stream_gen=expected_output
+        )
+        mock_ignore_patterns.assert_called_once_with("*AmplifierData*.bin")
+        mock_copy_tree.assert_called_once_with(
+            CHRONIC_DATA_DIR, Path("."), ignore=["*AmplifierData*.bin"]
+        )
+        mock_memmap.assert_has_calls(expected_memmap_calls)
+
+    @patch("warnings.warn")
+    @patch("spikeinterface.BaseRecording.save")
+    def test_compress_and_write_read_blocks(
+        self,
+        mock_bin_save: MagicMock,
+        _: MagicMock,
+    ):
+        """Tests _compress_and_write_block method with raw rec"""
+        read_blocks = self.chronic_job._get_read_blocks()
+        compressor = self.chronic_job._get_compressor()
+        output_dir = (
+            self.chronic_job.job_settings.output_directory / "compressed"
+        )
+        output_format = (
+            self.chronic_job.job_settings.compress_write_output_format
+        )
+        max_windows_filename_len = (
+            self.chronic_job.job_settings.compress_max_windows_filename_len
+        )
+        job_kwargs = self.chronic_job.job_settings.compress_job_save_kwargs
+        self.chronic_job._compress_and_write_block(
+            read_blocks=read_blocks,
+            compressor=compressor,
+            output_dir=output_dir,
+            max_windows_filename_len=max_windows_filename_len,
+            output_format=output_format,
+            job_kwargs=job_kwargs,
+        )
+        mock_bin_save.assert_has_calls(
+            [
+                call(
+                    format="zarr",
+                    folder=(
+                        Path("output_dir_chronic")
+                        / "compressed"
+                        / ("2025-05-13T19-00-00_AmplifierData.zarr")
+                    ),
+                    compressor=WavPack(
+                        bps=0,
+                        dynamic_noise_shaping=True,
+                        level=3,
+                        num_decoding_threads=8,
+                        num_encoding_threads=1,
+                        shaping_weight=0.0,
+                    ),
+                    compressor_by_dataset={"times": None},
+                    n_jobs=1,
+                )
+            ],
+            any_order=True,
+        )
+
+    def test_time_alignment_chronic(self):
+        """Tests time alignment check for chronic data"""
+        timestamps_ok = self.chronic_job._check_timestamps_alignment()
+        self.assertTrue(
+            timestamps_ok, "Timestamps should be aligned for chronic data."
         )
 
 
