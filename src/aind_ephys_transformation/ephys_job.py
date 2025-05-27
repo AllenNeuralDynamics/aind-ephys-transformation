@@ -8,7 +8,7 @@ import sys
 import json
 from datetime import datetime
 from pathlib import Path
-from typing import Iterator, Literal, Optional, Union
+from typing import Iterator, Literal, Optional
 
 import numpy as np
 from aind_data_transformation.core import (
@@ -120,12 +120,20 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
         """
         if self.job_settings.reader_name == ReaderName.CHRONIC:
             dataset_folder = Path(self.job_settings.input_source)
-            onix_folders = [p for p in dataset_folder.iterdir() if p.is_dir() and "OnixEphys" in p.name]
+            onix_folders = [
+                p
+                for p in dataset_folder.iterdir()
+                if p.is_dir() and "OnixEphys" in p.name
+            ]
             assert len(onix_folders) == 1
             onix_folder = onix_folders[0]
 
             stream_name = "AmplifierData"
-            amplifier_datasets = [p for p in onix_folder.iterdir() if stream_name in p.name and p.suffix == ".bin"]
+            amplifier_datasets = [
+                p
+                for p in onix_folder.iterdir()
+                if stream_name in p.name and p.suffix == ".bin"
+            ]
 
             probe_json = dataset_folder / "probe.json"
             binary_info_json = dataset_folder / "binary_info.json"
@@ -144,7 +152,9 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
                 amp_data = [p for p in amplifier_datasets if date in p.name][0]
 
                 recording = si.read_binary(amp_data, **binary_info)
-                recording = recording.set_probegroup(probe_group, group_mode="by_shank")
+                recording = recording.set_probegroup(
+                    probe_group, group_mode="by_shank"
+                )
 
                 # unsigned to signed
                 rec = spre.unsigned_to_signed(recording, bit_depth=adc_depth)
@@ -158,10 +168,12 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
                 )
         elif self.job_settings.reader_name == ReaderName.OPENEPHYS:
             nblocks = se.get_neo_num_blocks(
-                self.job_settings.reader_name.value, self.job_settings.input_source
+                self.job_settings.reader_name.value,
+                self.job_settings.input_source,
             )
             stream_names, _ = se.get_neo_streams(
-                self.job_settings.reader_name.value, self.job_settings.input_source
+                self.job_settings.reader_name.value,
+                self.job_settings.input_source,
             )
             # load first stream to map block_indices to experiment_names
             rec_test = se.read_openephys(
@@ -204,8 +216,9 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
 
         """
         if self.job_settings.reader_name == ReaderName.CHRONIC:
-            # Chronic data does not have .dat files, so we return an empty iterator
-            amplifier_data_files = self.job_settings.input_source.glob("**/*AmplifierData*.bin")
+            amplifier_data_files = self.job_settings.input_source.glob(
+                "**/*AmplifierData*.bin"
+            )
             dataset_folder = Path(self.job_settings.input_source)
             binary_info_json = dataset_folder / "binary_info.json"
             with open(binary_info_json) as f:
@@ -223,13 +236,16 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
                 yield {
                     "data": data,
                     "relative_path_name": str(
-                        amp_data_file.relative_to(self.job_settings.input_source)
+                        amp_data_file.relative_to(
+                            self.job_settings.input_source
+                        )
                     ),
                     "n_chan": n_chan,
                 }
         else:
             stream_names, _ = se.get_neo_streams(
-                self.job_settings.reader_name.value, self.job_settings.input_source
+                self.job_settings.reader_name.value,
+                self.job_settings.input_source,
             )
             for dat_file in self.job_settings.input_source.glob("**/*.dat"):
                 oe_stream_name = dat_file.parent.name
@@ -273,6 +289,9 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
             return self._check_openephys_timestamps()
 
     def _check_openephys_timestamps(self) -> bool:
+        """
+        Check if timestamps have been aligned in OpenEphys data.
+        """
         openephys_folder = self.job_settings.input_source
 
         # Check if original_timestamps.npy files are present
@@ -302,9 +321,11 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
         """
         if self.job_settings.compressor_name == CompressorName.BLOSC:
             from numcodecs import Blosc
+
             return Blosc(**self.job_settings.compressor_kwargs)
         elif self.job_settings.compressor_name == CompressorName.WAVPACK:
             from wavpack_numcodecs import WavPack
+
             return WavPack(**self.job_settings.compressor_kwargs)
         else:
             # TODO: This is validated during the construction of JobSettings,
