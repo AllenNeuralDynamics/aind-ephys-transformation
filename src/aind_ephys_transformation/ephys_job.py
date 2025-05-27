@@ -17,15 +17,13 @@ from aind_data_transformation.core import (
     JobResponse,
     get_parser,
 )
-from numcodecs import Blosc
+from numcodecs.abc import Codec
 from pydantic import Field
 
 import probeinterface as pi
 import spikeinterface as si
 from spikeinterface import extractors as se
 import spikeinterface.preprocessing as spre
-
-from wavpack_numcodecs import WavPack
 
 from aind_ephys_transformation.models import (
     CompressorName,
@@ -293,18 +291,20 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
         else:
             return True
 
-    def _get_compressor(self) -> Union[Blosc, WavPack]:
+    def _get_compressor(self) -> Codec:
         """
-        Utility method to construct a compressor class.
+        Utility method to construct a compressor object.
         Returns
         -------
-        Union[Blosc, WavPack]
-          Either an instantiated Blosc or WavPack class.
+        Codec
+          Either an instantiated numcodecs Codec object.
 
         """
         if self.job_settings.compressor_name == CompressorName.BLOSC:
+            from numcodecs import Blosc
             return Blosc(**self.job_settings.compressor_kwargs)
         elif self.job_settings.compressor_name == CompressorName.WAVPACK:
+            from wavpack_numcodecs import WavPack
             return WavPack(**self.job_settings.compressor_kwargs)
         else:
             # TODO: This is validated during the construction of JobSettings,
@@ -420,7 +420,7 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
     def _compress_and_write_block(
         self,
         read_blocks: Iterator[dict],
-        compressor: Union[WavPack, Blosc],
+        compressor: Codec,
         output_dir: Path,
         job_kwargs: dict,
         max_windows_filename_len: int,
@@ -434,7 +434,7 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
         read_blocks : Iterator[dict]
           Either [{'recording', 'block_index', 'stream_name'},...] or
           [{'scale_recording', 'block_index', 'stream_name'},...]
-        compressor : Union[WavPack, Blosc]
+        compressor : Codec
         output_dir : Path
           Output directory to write compressed data
         job_kwargs : dict
