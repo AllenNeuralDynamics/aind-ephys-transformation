@@ -8,7 +8,7 @@ import sys
 import json
 from datetime import datetime
 from pathlib import Path
-from typing import Iterator, Literal, Optional
+from typing import Iterator, Literal, Optional, List
 
 import numpy as np
 from aind_data_transformation.core import (
@@ -51,6 +51,14 @@ class EphysJobSettings(BasicJobSettings):
         description="Check if timestamps are aligned and raise an error if "
         "they are not.",
         title="Check Timestamps",
+    )
+    chunks_to_compress: Optional[List[int]] = Field(
+        default=None,
+        description=(
+            "List of chunks to compress. If None, all chunks will be "
+            "compressed."
+        ),
+        title="Chunks to Compress",
     )
     # Compress settings
     random_seed: Optional[int] = 0
@@ -134,22 +142,33 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
                 for p in onix_folder.iterdir()
                 if stream_name in p.name and p.suffix == ".bin"
             ]
+            # Parse and sort dates
+            date_format = "%Y-%m-%dT%H-%M-%S"
+            dates = [
+                datetime.strptime(p.stem.split("_")[-1], date_format)
+                for p in amplifier_datasets
+            ]
+            sorted_dates = sorted(dates)
 
+            # If chunks_to_compress is set, filter the datasets
+            if self.job_settings.chunks_to_compress is not None:
+                sorted_dates = np.array(sorted_dates)[
+                    self.job_settings.chunks_to_compress
+                ]
+
+            # Parse probe and binary info
             probe_json = dataset_folder / "probe.json"
             binary_info_json = dataset_folder / "binary_info.json"
-
             probe_group = pi.read_probeinterface(probe_json)
-
             with open(binary_info_json) as f:
                 binary_info = json.load(f)
-
             adc_depth = binary_info.pop("adc_depth")
 
-            # sort dates
-            dates = [p.stem.split("_")[-1] for p in amplifier_datasets]
-
-            for date in dates:
-                amp_data = [p for p in amplifier_datasets if date in p.name][0]
+            for date in sorted_dates:
+                date_str = date.strftime(date_format)
+                amp_data = [
+                    p for p in amplifier_datasets if date_str in p.name
+                ][0]
 
                 recording = si.read_binary(amp_data, **binary_info)
                 recording = recording.set_probegroup(
@@ -162,7 +181,7 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
                 yield (
                     {
                         "recording": rec,
-                        "experiment_name": date,
+                        "experiment_name": date_str,
                         "stream_name": stream_name,
                     }
                 )

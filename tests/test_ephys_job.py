@@ -1193,9 +1193,59 @@ class TestChronicCompressJob(unittest.TestCase):
             job_settings=chronic_job_settings
         )
 
+        chronic_job_settings_filter = EphysJobSettings(
+            input_source=CHRONIC_DATA_DIR,
+            output_directory=Path("output_dir_chronic"),
+            compress_job_save_kwargs={"n_jobs": 1},
+            reader_name="chronic",
+            chunks_to_compress=[0]
+        )
+        cls.chronic_job_settings_filter = chronic_job_settings_filter
+        cls.chronic_job_filter = EphysCompressionJob(
+            job_settings=chronic_job_settings_filter
+        )
+
     def test_get_read_blocks(self):
         """Tests _get_read_blocks method"""
         read_blocks = self.chronic_job._get_read_blocks()
+        # Instead of constructing OpenEphysBinaryRecordingExtractor to
+        # compare against, we can just compare the repr of the classes
+        read_blocks_repr = []
+        for read_block in read_blocks:
+            copied_read_block = read_block
+            copied_read_block["recording"] = repr(read_block["recording"])
+            read_blocks_repr.append(copied_read_block)
+        extractor_str = (
+            "UnsignedToSignedRecording: 384 channels - 30.0kHz - 1 segments "
+            "- 100 samples - 0.00s (3.33 ms) \n                           "
+            "int16 dtype - 75.00 KiB"
+        )
+        expected_read_blocks = [
+            {
+                "recording": extractor_str,
+                "experiment_name": "2025-05-13T19-00-00",
+                "stream_name": "AmplifierData",
+            },
+            {
+                "recording": extractor_str,
+                "experiment_name": "2025-05-13T20-00-00",
+                "stream_name": "AmplifierData",
+            },
+            {
+                "recording": extractor_str,
+                "experiment_name": "2025-05-13T21-00-00",
+                "stream_name": "AmplifierData",
+            }
+        ]
+        expected_scaled_read_blocks_str = set(
+            [json.dumps(o) for o in expected_read_blocks]
+        )
+        read_blocks_repr_str = set([json.dumps(o) for o in read_blocks_repr])
+        self.assertEqual(expected_scaled_read_blocks_str, read_blocks_repr_str)
+
+    def test_get_read_blocks_filter(self):
+        """Tests _get_read_blocks method"""
+        read_blocks = self.chronic_job_filter._get_read_blocks()
         # Instead of constructing OpenEphysBinaryRecordingExtractor to
         # compare against, we can just compare the repr of the classes
         read_blocks_repr = []
@@ -1242,6 +1292,20 @@ class TestChronicCompressJob(unittest.TestCase):
                 ),
                 "n_chan": 384,
                 "data": (100, 384),
+            },
+            {
+                "relative_path_name": str(
+                    "OnixEphys/OnixEphys_AmplifierData_2025-05-13T20-00-00.bin"
+                ),
+                "n_chan": 384,
+                "data": (100, 384),
+            },
+            {
+                "relative_path_name": str(
+                    "OnixEphys/OnixEphys_AmplifierData_2025-05-13T21-00-00.bin"
+                ),
+                "n_chan": 384,
+                "data": (100, 384),
             }
         ]
         expected_output_str = set([json.dumps(o) for o in expected_output])
@@ -1266,6 +1330,20 @@ class TestChronicCompressJob(unittest.TestCase):
             {
                 "relative_path_name": str(
                     "OnixEphys/OnixEphys_AmplifierData_2025-05-13T19-00-00.bin"
+                ),
+                "n_chan": 384,
+                "data": (100, 384),
+            },
+            {
+                "relative_path_name": str(
+                    "OnixEphys/OnixEphys_AmplifierData_2025-05-13T20-00-00.bin"
+                ),
+                "n_chan": 384,
+                "data": (100, 384),
+            },
+            {
+                "relative_path_name": str(
+                    "OnixEphys/OnixEphys_AmplifierData_2025-05-13T21-00-00.bin"
                 ),
                 "n_chan": 384,
                 "data": (100, 384),
@@ -1330,6 +1408,42 @@ class TestChronicCompressJob(unittest.TestCase):
                         Path("output_dir_chronic")
                         / "compressed"
                         / ("2025-05-13T19-00-00_AmplifierData.zarr")
+                    ),
+                    compressor=WavPack(
+                        bps=0,
+                        dynamic_noise_shaping=True,
+                        level=3,
+                        num_decoding_threads=8,
+                        num_encoding_threads=1,
+                        shaping_weight=0.0,
+                    ),
+                    compressor_by_dataset={"times": None},
+                    n_jobs=1,
+                ),
+                call(
+                    format="zarr",
+                    folder=(
+                        Path("output_dir_chronic")
+                        / "compressed"
+                        / ("2025-05-13T20-00-00_AmplifierData.zarr")
+                    ),
+                    compressor=WavPack(
+                        bps=0,
+                        dynamic_noise_shaping=True,
+                        level=3,
+                        num_decoding_threads=8,
+                        num_encoding_threads=1,
+                        shaping_weight=0.0,
+                    ),
+                    compressor_by_dataset={"times": None},
+                    n_jobs=1,
+                ),
+                call(
+                    format="zarr",
+                    folder=(
+                        Path("output_dir_chronic")
+                        / "compressed"
+                        / ("2025-05-13T21-00-00_AmplifierData.zarr")
                     ),
                     compressor=WavPack(
                         bps=0,
