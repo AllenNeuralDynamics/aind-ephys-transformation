@@ -1298,12 +1298,12 @@ class TestChronicCompressJob(unittest.TestCase):
     def test_read_blocks_no_match(self):
         """Tests _get_read_blocks method with no matching chunks"""
         with self.assertRaises(ValueError):
-            _ = self.chronic_job_no_match._get_read_blocks()
+            list(self.chronic_job_no_match._get_read_blocks())
 
     def test_read_blocks_multi_match(self):
         """Tests _get_read_blocks method with multiple matching chunks"""
         with self.assertRaises(ValueError):
-            _ = self.chronic_job_multi_match._get_read_blocks()
+            list(self.chronic_job_multi_match._get_read_blocks())
 
     def test_get_streams_to_clip(self):
         """Tests _get_streams_to_clip method"""
