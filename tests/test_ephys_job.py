@@ -1198,11 +1198,35 @@ class TestChronicCompressJob(unittest.TestCase):
             output_directory=Path("output_dir_chronic"),
             compress_job_save_kwargs={"n_jobs": 1},
             reader_name="chronic",
-            chunks_to_compress=[0]
+            chunks_to_compress=["2025-05-13T19-00-00"],
         )
         cls.chronic_job_settings_filter = chronic_job_settings_filter
         cls.chronic_job_filter = EphysCompressionJob(
             job_settings=chronic_job_settings_filter
+        )
+
+        chronic_job_settings_no_match = EphysJobSettings(
+            input_source=CHRONIC_DATA_DIR,
+            output_directory=Path("output_dir_chronic"),
+            compress_job_save_kwargs={"n_jobs": 1},
+            reader_name="chronic",
+            chunks_to_compress=["2024-05-13T19-00-00"],
+        )
+        cls.chronic_job_settings_no_match = chronic_job_settings_no_match
+        cls.chronic_job_no_match = EphysCompressionJob(
+            job_settings=chronic_job_settings_no_match
+        )
+
+        chronic_job_settings_multi_match = EphysJobSettings(
+            input_source=CHRONIC_DATA_DIR,
+            output_directory=Path("output_dir_chronic"),
+            compress_job_save_kwargs={"n_jobs": 1},
+            reader_name="chronic",
+            chunks_to_compress=["2025-05-13"],
+        )
+        cls.chronic_job_settings_multi_match = chronic_job_settings_multi_match
+        cls.chronic_job_multi_match = EphysCompressionJob(
+            job_settings=chronic_job_settings_multi_match
         )
 
     def test_get_read_blocks(self):
@@ -1235,7 +1259,7 @@ class TestChronicCompressJob(unittest.TestCase):
                 "recording": extractor_str,
                 "experiment_name": "2025-05-13T21-00-00",
                 "stream_name": "AmplifierData",
-            }
+            },
         ]
         expected_scaled_read_blocks_str = set(
             [json.dumps(o) for o in expected_read_blocks]
@@ -1270,6 +1294,15 @@ class TestChronicCompressJob(unittest.TestCase):
         )
         read_blocks_repr_str = set([json.dumps(o) for o in read_blocks_repr])
         self.assertEqual(expected_scaled_read_blocks_str, read_blocks_repr_str)
+
+    def test_read_blocks_no_match(self):
+        """Tests _get_read_blocks method with no matching chunks"""
+        with self.assertRaises(ValueError) as e:
+            read_blocks = self.chronic_job_no_match._get_read_blocks()
+
+    def test_read_blocks_multi_match(self):
+        with self.assertRaises(ValueError) as e:
+            read_blocks = self.chronic_job_multi_match._get_read_blocks()
 
     def test_get_streams_to_clip(self):
         """Tests _get_streams_to_clip method"""
@@ -1306,7 +1339,7 @@ class TestChronicCompressJob(unittest.TestCase):
                 ),
                 "n_chan": 384,
                 "data": (100, 384),
-            }
+            },
         ]
         expected_output_str = set([json.dumps(o) for o in expected_output])
         streams_to_clip_just_shape_str = set(
@@ -1347,7 +1380,7 @@ class TestChronicCompressJob(unittest.TestCase):
                 ),
                 "n_chan": 384,
                 "data": (100, 384),
-            }
+            },
         ]
         expected_memmap_calls = []
         for foobar in expected_output:
@@ -1455,7 +1488,7 @@ class TestChronicCompressJob(unittest.TestCase):
                     ),
                     compressor_by_dataset={"times": None},
                     n_jobs=1,
-                )
+                ),
             ],
             any_order=True,
         )
