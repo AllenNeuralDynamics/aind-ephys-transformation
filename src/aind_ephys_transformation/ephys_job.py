@@ -52,11 +52,11 @@ class EphysJobSettings(BasicJobSettings):
         "they are not.",
         title="Check Timestamps",
     )
-    chunks_to_compress: Optional[List[int]] = Field(
+    chunks_to_compress: Optional[List[str]] = Field(
         default=None,
         description=(
-            "List of chunks to compress. If None, all chunks will be "
-            "compressed."
+            "List of chunks to compress. Each element should be a substring "
+            "of the chunk file name. If None, all chunks will be compressed."
         ),
         title="Chunks to Compress",
     )
@@ -142,19 +142,28 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
                 for p in onix_folder.iterdir()
                 if stream_name in p.name and p.suffix == ".bin"
             ]
-            # Parse and sort dates
-            date_format = "%Y-%m-%dT%H-%M-%S"
-            dates = [
-                datetime.strptime(p.stem.split("_")[-1], date_format)
-                for p in amplifier_datasets
-            ]
-            sorted_dates = sorted(dates)
 
             # If chunks_to_compress is set, filter the datasets
             if self.job_settings.chunks_to_compress is not None:
-                sorted_dates = np.array(sorted_dates)[
-                    self.job_settings.chunks_to_compress
-                ]
+                amplifier_datasets_to_compress = []
+                for chunk_str in self.job_settings.chunks_to_compress:
+                    matching_datasets = [
+                        p for p in amplifier_datasets if chunk_str in p.name
+                    ]
+                    if len(matching_datasets) == 0:
+                        raise ValueError(
+                            f"Chunk {chunk_str} not found in {stream_name} "
+                            "datasets."
+                        )
+                    elif len(matching_datasets) > 1:
+                        raise ValueError(
+                            f"Multiple datasets found for chunk {chunk_str} "
+                            f"in {stream_name} datasets: {matching_datasets}. "
+                            "Please specify a more specific chunk."
+                        )
+                    amplifier_datasets_to_compress.append(matching_datasets[0])
+            else:
+                amplifier_datasets_to_compress = amplifier_datasets
 
             # Parse probe and binary info
             probe_json = dataset_folder / "probe.json"
@@ -164,13 +173,9 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
                 binary_info = json.load(f)
             adc_depth = binary_info.pop("adc_depth")
 
-            for date in sorted_dates:
-                date_str = date.strftime(date_format)
-                amp_data = [
-                    p for p in amplifier_datasets if date_str in p.name
-                ][0]
-
-                recording = si.read_binary(amp_data, **binary_info)
+            for amplifier_dataset in amplifier_datasets_to_compress:
+                date = amplifier_dataset.stem.split("_")[-1]
+                recording = si.read_binary(amplifier_dataset, **binary_info)
                 recording = recording.set_probegroup(
                     probe_group, group_mode="by_shank"
                 )
@@ -181,7 +186,7 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
                 yield (
                     {
                         "recording": rec,
-                        "experiment_name": date_str,
+                        "experiment_name": date,
                         "stream_name": stream_name,
                     }
                 )
