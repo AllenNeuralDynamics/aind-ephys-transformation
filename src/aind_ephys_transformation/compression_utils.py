@@ -146,11 +146,12 @@ def add_or_append_recording_to_zarr_group(  # noqa: C901
         add_properties_and_annotations(zarr_group, recording)
 
     if annotations_to_update is not None:
-        for key, value in annotations_to_update.items():
+        for key in annotations_to_update:
+            value = recording.get_annotation(key)
             if key in zarr_group.attrs:
                 zarr_group.attrs[key].update(value)
             else:
-                zarr_group.attrs.create(key, value)
+                zarr_group.attrs[key] = value
 
 
 def add_or_append_traces_to_zarr(
@@ -195,8 +196,6 @@ def add_or_append_traces_to_zarr(
 
     assert dataset_paths is not None, "Provide 'file_path'"
 
-    if not isinstance(dataset_paths, list):
-        dataset_paths = [dataset_paths]
     assert len(dataset_paths) == recording.get_num_segments()
 
     dtype = recording.get_dtype()

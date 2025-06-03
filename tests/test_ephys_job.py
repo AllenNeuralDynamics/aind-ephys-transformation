@@ -1505,6 +1505,42 @@ class TestChronicCompressJob(unittest.TestCase):
             expected_output_str, streams_to_clip_just_shape_str
         )
 
+        streams_to_clip_filter = self.chronic_job_filter._get_streams_to_clip()
+        streams_to_clip_just_shape = []
+        for stream_to_clip in streams_to_clip_filter:
+            stream_to_clip_copy = {
+                "relative_path_name": stream_to_clip[
+                    "relative_path_name"
+                ],
+                "n_chan": stream_to_clip["n_chan"],
+                "data": stream_to_clip["data"].shape,
+            }
+            streams_to_clip_just_shape.append(stream_to_clip_copy)
+
+        expected_output = [
+            {
+                "relative_path_name": str(
+                    "OnixEphys/OnixEphys_AmplifierData_2025-05-13T19-00-00.bin"
+                ),
+                "n_chan": 384,
+                "data": (100, 384),
+            }
+        ]
+        expected_output_str = set(
+            [json.dumps(o) for o in expected_output]
+        )
+        streams_to_clip_just_shape_str = set(
+            [json.dumps(o) for o in streams_to_clip_just_shape]
+        )
+        self.assertEqual(
+            expected_output_str, streams_to_clip_just_shape_str
+        )
+
+        with self.assertRaises(ValueError):
+            list(self.chronic_job_no_match._get_streams_to_clip())
+
+        
+
     @patch("shutil.copytree")
     @patch("shutil.ignore_patterns")
     @patch("numpy.memmap")
@@ -1637,6 +1673,7 @@ class TestChronicCompressJob(unittest.TestCase):
             output_format=output_format,
             job_kwargs=job_kwargs,
         )
+
         read_blocks2 = self.chronic_job_append2._get_read_blocks()
         self.chronic_job_append2._compress_and_write_block(
             read_blocks=read_blocks2,

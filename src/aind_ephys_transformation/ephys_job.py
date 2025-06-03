@@ -677,6 +677,7 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
                     folder_path=zarr_path,
                     compressor=compressor,
                     compressor_by_dataset=compressor_by_dataset,
+                    annotations_to_update=["start_end_frames"],
                     **job_kwargs,
                 )
             else:
