@@ -13,7 +13,7 @@ from aind_ephys_transformation.compression_utils import (
 )
 
 
-class TestEphysJob(unittest.TestCase):
+class TestCompressionUtils(unittest.TestCase):
     """Tests for compression_utils module"""
 
     @classmethod
@@ -200,11 +200,12 @@ class TestEphysJob(unittest.TestCase):
 
         # Set t_start for the recording
         self.recording1._recording_segments[0].t_start = 0
+        self.recording1._recording_segments[0].time_vector = None
         self.recording1.shift_times(50.0)
 
         # Write the recording
         write_or_append_recording_to_zarr(
-            self.recording1, temp_zarr_path, n_jobs=2
+            self.recording1, temp_zarr_path, n_jobs=1
         )
 
         # Verify t_start is saved correctly
