@@ -1,4 +1,5 @@
-"""Tests for compression utilities in the AIND Ephys Transformation pipeline."""
+"""Tests for compression utilities in the Ephys Transformation pipeline."""
+
 import unittest
 import shutil
 from pathlib import Path
@@ -10,7 +11,6 @@ from spikeinterface import generate_ground_truth_recording
 from aind_ephys_transformation.compression_utils import (
     write_or_append_recording_to_zarr,
 )
-
 
 
 class TestEphysJob(unittest.TestCase):
@@ -25,11 +25,15 @@ class TestEphysJob(unittest.TestCase):
         cls.recording2, _ = generate_ground_truth_recording(
             durations=[20], seed=2205
         )
-        cls.recording_multi_segment1, _ = generate_ground_truth_recording(
-            durations=[10, 5], seed=2308
+        cls.recording_multi_segment1, _ = (
+            generate_ground_truth_recording(
+                durations=[10, 5], seed=2308
+            )
         )
-        cls.recording_multi_segment2, _ = generate_ground_truth_recording(
-            durations=[20, 15], seed=2308
+        cls.recording_multi_segment2, _ = (
+            generate_ground_truth_recording(
+                durations=[20, 15], seed=2308
+            )
         )
         cls.tmp_path = Path("tmp_test_ephys_compression_utils")
 
@@ -53,7 +57,6 @@ class TestEphysJob(unittest.TestCase):
             zarr_data["traces_seg0"][:], self.recording1.get_traces()
         )
 
-
     def test_append_to_existing_recording(self):
         """Test appending to an existing zarr file."""
         # First write
@@ -71,14 +74,17 @@ class TestEphysJob(unittest.TestCase):
         # Verify the data was appended correctly
         zarr_data = zarr.open(str(temp_zarr_path), mode="r")
         expected_shape = (
-            self.recording1.get_num_samples() + self.recording2.get_num_samples(),
+            self.recording1.get_num_samples()
+            + self.recording2.get_num_samples(),
             self.recording1.get_num_channels(),
         )
         assert zarr_data["traces_seg0"].shape == expected_shape
 
         # First half should match original data
         np.testing.assert_array_equal(
-            zarr_data["traces_seg0"][: self.recording1.get_num_samples()],
+            zarr_data["traces_seg0"][
+                : self.recording1.get_num_samples()
+            ],
             self.recording1.get_traces(),
         )
         # Second half should match appended data
@@ -86,7 +92,6 @@ class TestEphysJob(unittest.TestCase):
             zarr_data["traces_seg0"][self.recording1.get_num_samples():],
             self.recording2.get_traces(),
         )
-
 
     def test_write_multiple_segments(self):
         """Test writing multiple segments."""
@@ -108,9 +113,8 @@ class TestEphysJob(unittest.TestCase):
                 zarr_data[f"traces_seg{segment_index}"][:],
                 self.recording_multi_segment1.get_traces(
                     segment_index=segment_index
-                )
+                ),
             )
-
 
     def test_append_multiple_segments(self):
         """Test appending multiple segments to an existing zarr file."""
@@ -131,16 +135,22 @@ class TestEphysJob(unittest.TestCase):
         for segment_index in range(
             self.recording_multi_segment1.get_num_segments()
         ):
-            segment_traces1 = self.recording_multi_segment1.get_traces(
-                segment_index
+            segment_traces1 = (
+                self.recording_multi_segment1.get_traces(
+                    segment_index
+                )
             )
-            segment_traces2 = self.recording_multi_segment2.get_traces(
-                segment_index
+            segment_traces2 = (
+                self.recording_multi_segment2.get_traces(
+                    segment_index
+                )
             )
             segment_name = f"traces_seg{segment_index}"
 
-            num_samples1 = self.recording_multi_segment1.get_num_samples(
-                segment_index
+            num_samples1 = (
+                self.recording_multi_segment1.get_num_samples(
+                    segment_index
+                )
             )
 
             # first recording
@@ -154,7 +164,6 @@ class TestEphysJob(unittest.TestCase):
                     zarr_data[segment_name][num_samples1:],
                     segment_traces2,
                 )
-
 
     def test_append_with_times(self):
         """Test appending recordings with time vectors."""
@@ -180,7 +189,7 @@ class TestEphysJob(unittest.TestCase):
             np.concatenate(
                 [
                     self.recording1.get_times(),
-                    self.recording2.get_times()
+                    self.recording2.get_times(),
                 ]
             ),
         )
@@ -201,8 +210,7 @@ class TestEphysJob(unittest.TestCase):
         # Verify t_start is saved correctly
         zarr_data = zarr.open(temp_zarr_path, mode="r")
         np.testing.assert_array_equal(
-            zarr_data["t_starts"],
-            np.array([50.0])
+            zarr_data["t_starts"], np.array([50.0])
         )
 
     def test_with_provenance(self):
@@ -210,7 +218,9 @@ class TestEphysJob(unittest.TestCase):
         temp_zarr_path = self.tmp_path / "test_provenance.zarr"
 
         # Set provenance for the recording
-        recording2 = self.recording1.save(folder=self.tmp_path / "cached")
+        recording2 = self.recording1.save(
+            folder=self.tmp_path / "cached"
+        )
 
         # Write the recording
         write_or_append_recording_to_zarr(

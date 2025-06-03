@@ -1,3 +1,4 @@
+"""Compression utilities for writing recordings to Zarr format."""
 from pathlib import Path
 import numpy as np
 import zarr
@@ -15,23 +16,30 @@ def write_or_append_recording_to_zarr(
     recording: BaseRecording,
     folder_path: str | Path,
     storage_options: dict | None = None,
+    annotations_to_update: dict | None = None,
     **kwargs,
 ):
+    """Write or append a recording to a Zarr folder."""
     zarr_root = zarr.open(
         str(folder_path), mode="a", storage_options=storage_options
     )
     add_or_append_recording_to_zarr_group(
-        recording, zarr_root, **kwargs
+        recording,
+        zarr_root,
+        annotations_to_update=annotations_to_update,
+        **kwargs,
     )
 
 
-def add_or_append_recording_to_zarr_group(
+def add_or_append_recording_to_zarr_group(  # noqa: C901
     recording: BaseRecording,
     zarr_group: zarr.hierarchy.Group,
     verbose=False,
     dtype=None,
+    annotations_to_update=None,
     **kwargs,
 ):
+    """Add or append a recording to a Zarr group."""
     zarr_kwargs, job_kwargs = split_job_kwargs(kwargs)
 
     if recording.check_if_json_serializable():
@@ -124,7 +132,7 @@ def add_or_append_recording_to_zarr_group(
                 time_dset.resize(
                     (time_dset.shape[0] + len(time_vector),)
                 )
-                time_dset[-len(time_vector) :] = time_vector
+                time_dset[-len(time_vector):] = time_vector
 
         elif d["t_start"] is not None:
             t_starts[segment_index] = d["t_start"]
@@ -136,6 +144,13 @@ def add_or_append_recording_to_zarr_group(
 
     if "properties" not in zarr_group:
         add_properties_and_annotations(zarr_group, recording)
+
+    if annotations_to_update is not None:
+        for key, value in annotations_to_update.items():
+            if key in zarr_group.attrs:
+                zarr_group.attrs[key].update(value)
+            else:
+                zarr_group.attrs.create(key, value)
 
 
 def add_or_append_traces_to_zarr(
@@ -235,6 +250,8 @@ def add_or_append_traces_to_zarr(
 def _init_zarr_worker_append(
     recording, zarr_datasets, dtype, global_start_frames
 ):
+    """Initialize the worker context for appending to Zarr."""
+
     # create a local dict per worker
     worker_ctx = {}
     worker_ctx["recording"] = recording
@@ -249,6 +266,7 @@ def _init_zarr_worker_append(
 def _write_zarr_chunk_append(
     segment_index, start_frame, end_frame, worker_ctx
 ):
+    """Write a chunk of traces to Zarr for appending."""
     import gc
 
     # recover variables of the worker
