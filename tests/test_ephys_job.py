@@ -1539,8 +1539,6 @@ class TestChronicCompressJob(unittest.TestCase):
         with self.assertRaises(ValueError):
             list(self.chronic_job_no_match._get_streams_to_clip())
 
-        
-
     @patch("shutil.copytree")
     @patch("shutil.ignore_patterns")
     @patch("numpy.memmap")
