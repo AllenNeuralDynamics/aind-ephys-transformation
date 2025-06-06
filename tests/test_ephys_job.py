@@ -1564,8 +1564,8 @@ class TestChronicCompressJob(unittest.TestCase):
                 shaping_weight=0.0,
             ),
             "max_windows_filename_len": 150,
-            "output_dir": 
-                self.chronic_job.job_settings.output_directory / 
+            "output_dir":
+                self.chronic_job.job_settings.output_directory /
                 "ecephys_compressed",
             "output_format": "zarr",
             "job_kwargs": {"n_jobs": 1},
