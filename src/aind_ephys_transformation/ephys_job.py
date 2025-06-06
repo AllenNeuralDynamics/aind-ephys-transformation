@@ -9,6 +9,7 @@ import json
 from datetime import datetime
 from pathlib import Path
 from typing import Iterator, Literal, Optional, List
+from pydantic import model_validator
 
 import numpy as np
 from aind_data_transformation.core import (
@@ -60,14 +61,24 @@ class EphysJobSettings(BasicJobSettings):
         "they are not.",
         title="Check Timestamps",
     )
-    chunks_to_compress: Optional[List[str]] = Field(
+    chronic_chunks_to_compress: Optional[List[str]] = Field(
         default=None,
         description=(
             "List of chunks to compress (chronic). "
-            "Each element should be a substring of the chunk file name. "
-            "If None, all chunks will be compressed."
+            "Each element should be the date in the chunk file name. "
+            "If None, all chunks in the input source folder will "
+            "be compressed."
         ),
         title="Chunks to Compress",
+    )
+    chronic_start_flag: bool = Field(
+        default=False,
+        description=(
+            "If True, it signals that the data to compress is the first "
+            "chunk(s) of a chronic recording. This will be used to set "
+            "additional attirbutes to the zarr groups."
+        ),
+        title="Chronic Start Flag",
     )
     check_chronic_consecutive_hours: bool = Field(
         default=True,
@@ -138,6 +149,20 @@ class EphysJobSettings(BasicJobSettings):
         title="Scale Chunk Size",
     )
 
+    @model_validator(mode="after")
+    def validate_chronic_chunks_to_compress(self):
+        """Fills chronic_chunks_to_compress fro chronic reader if None."""
+        if self.reader_name == ReaderName.CHRONIC:
+            if self.chronic_chunks_to_compress is None:
+                dates = [
+                    p.stem.split("_")[-1]
+                    for p in Path(self.input_source).glob(
+                        "**/OnixEphys_AmplifierData_*.bin"
+                    )
+                ]
+                self.chronic_chunks_to_compress = dates
+        return self
+
 
 class EphysCompressionJob(GenericEtl[EphysJobSettings]):
     """Main class to handle ephys data compression"""
@@ -169,31 +194,24 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
                 if stream_name in p.name and p.suffix == ".bin"
             ]
 
-            # If chunks_to_compress is set, filter the datasets
-            if self.job_settings.chunks_to_compress is not None:
-                amplifier_datasets_to_compress = []
-                for chunk_str in self.job_settings.chunks_to_compress:
-                    matching_datasets = [
-                        p
-                        for p in amplifier_datasets
-                        if chunk_str in p.name
-                    ]
-                    if len(matching_datasets) == 0:
-                        raise ValueError(
-                            f"Chunk {chunk_str} not found in {stream_name} "
-                            "datasets."
-                        )
-                    elif len(matching_datasets) > 1:
-                        raise ValueError(
-                            f"Multiple datasets found for chunk {chunk_str} "
-                            f"in {stream_name} datasets: {matching_datasets}. "
-                            "Please specify a more specific chunk."
-                        )
-                    amplifier_datasets_to_compress.append(
-                        matching_datasets[0]
+            # filter the datasets based on the chronic_chunks_to_compress
+            amplifier_datasets_to_compress = []
+            for chunk_date in self.job_settings.chronic_chunks_to_compress:
+                matching_datasets = [
+                    p for p in amplifier_datasets if chunk_date in p.name
+                ]
+                if len(matching_datasets) == 0:
+                    raise ValueError(
+                        f"Date {chunk_date} not found in {stream_name} "
+                        "datasets."
                     )
-            else:
-                amplifier_datasets_to_compress = amplifier_datasets
+                elif len(matching_datasets) > 1:
+                    raise ValueError(
+                        f"Multiple datasets found for date {chunk_date} "
+                        f"in {stream_name} datasets: {matching_datasets}. "
+                        "Please specify a more specific chunk."
+                    )
+                amplifier_datasets_to_compress.append(matching_datasets[0])
 
             # Sort by date
             amplifier_datasets_to_compress = sorted(
@@ -208,9 +226,7 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
             allowed_max = target_interval * (1 + tolerance)
 
             for i in range(len(amplifier_datasets_to_compress) - 1):
-                curr_dt = extract_datetime(
-                    amplifier_datasets_to_compress[i]
-                )
+                curr_dt = extract_datetime(amplifier_datasets_to_compress[i])
                 next_dt = extract_datetime(
                     amplifier_datasets_to_compress[i + 1]
                 )
@@ -227,9 +243,7 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
                         f"(allowed range: {allowed_min:.2f} to "
                         f"{allowed_max:.2f} hours)"
                     )
-                    if (
-                        self.job_settings.check_chronic_consecutive_hours
-                    ):
+                    if self.job_settings.check_chronic_consecutive_hours:
                         raise ValueError(message)
                     else:
                         logging.warning(message)
@@ -243,12 +257,41 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
             adc_depth = binary_info.pop("adc_depth")
 
             recording_list = []
-            cumulative_start_frame = 0
-            start_end_frames = {}
-            for amplifier_dataset in amplifier_datasets_to_compress:
-                recording = si.read_binary(
-                    amplifier_dataset, **binary_info
+            if self.job_settings.chronic_start_flag:
+                sample_index_from_session_start = 0
+            else:
+                # If not chronic start flag, we need to parse all previous
+                # clock bin files to get the cumulative start frame
+                first_chunk_to_compress = (
+                    self.job_settings.chronic_chunks_to_compress[0]
                 )
+                first_date_to_compress = datetime.strptime(
+                    first_chunk_to_compress, "%Y-%m-%dT%H-%M-%S"
+                )
+                all_previous_clock_files = [
+                    p
+                    for p in dataset_folder.glob("**/OnixEphys_Clock_*")
+                    if extract_datetime(p) < first_date_to_compress
+                ]
+                sorted_clock_files = sorted(
+                    all_previous_clock_files,
+                    key=lambda x: extract_datetime(x),
+                )
+                sample_index_from_session_start = 0
+                for clock_file in sorted_clock_files:
+                    clock_data = np.memmap(
+                        filename=clock_file, dtype="uint64", mode="r"
+                    )
+                    sample_index_from_session_start += len(clock_data)
+            logging.info(
+                f"Sample index from session start: "
+                f"{sample_index_from_session_start}"
+            )
+
+            start_end_frames = {}
+            cumulative_start_frame = sample_index_from_session_start
+            for amplifier_dataset in amplifier_datasets_to_compress:
+                recording = si.read_binary(amplifier_dataset, **binary_info)
 
                 # unsigned to signed
                 recording = spre.unsigned_to_signed(
@@ -258,8 +301,7 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
                 # keep track start and end frames for each chunk
                 start_end_frames[amplifier_dataset.name] = (
                     cumulative_start_frame,
-                    cumulative_start_frame
-                    + recording.get_num_frames(),
+                    cumulative_start_frame + recording.get_num_frames(),
                 )
                 # update cumulative start frame
                 cumulative_start_frame += recording.get_num_frames()
@@ -267,18 +309,15 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
                 recording_list.append(recording)
 
             # concatenate recordings
-            recording_concatenated = si.concatenate_recordings(
-                recording_list
-            )
+            recording_concatenated = si.concatenate_recordings(recording_list)
             # set probe
-            recording_concatenated = (
-                recording_concatenated.set_probegroup(
-                    probe_group, group_mode="by_shank"
-                )
+            recording_concatenated = recording_concatenated.set_probegroup(
+                probe_group, group_mode="by_shank"
             )
             # annotate recording with start and end frames
+            recording_concatenated.annotate(start_end_frames=start_end_frames)
             recording_concatenated.annotate(
-                start_end_frames=start_end_frames
+                sample_index_from_session_start=sample_index_from_session_start
             )
 
             yield (
@@ -303,16 +342,13 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
                 block_index=0,
                 stream_name=stream_names[0],
             )
-            record_node = list(
-                rec_test.neo_reader.folder_structure.keys()
-            )[0]
-            experiments = rec_test.neo_reader.folder_structure[
-                record_node
-            ]["experiments"]
+            record_node = list(rec_test.neo_reader.folder_structure.keys())[0]
+            experiments = rec_test.neo_reader.folder_structure[record_node][
+                "experiments"
+            ]
             exp_ids = list(experiments.keys())
             experiment_names = [
-                experiments[exp_id]["name"]
-                for exp_id in sorted(exp_ids)
+                experiments[exp_id]["name"] for exp_id in sorted(exp_ids)
             ]
             for block_index in range(nblocks):
                 for stream_name in stream_names:
@@ -325,9 +361,7 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
                     yield (
                         {
                             "recording": rec,
-                            "experiment_name": experiment_names[
-                                block_index
-                            ],
+                            "experiment_name": experiment_names[block_index],
                             "stream_name": stream_name,
                         }
                     )
@@ -343,60 +377,15 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
 
         """
         if self.job_settings.reader_name == ReaderName.CHRONIC:
-            amplifier_data_files = (
-                self.job_settings.input_source.glob(
-                    "**/*AmplifierData*.bin"
-                )
-            )
-            # If chunks_to_compress is set, filter the data files to clip
-            if self.job_settings.chunks_to_compress is not None:
-                # Filter the amplifier data files based on chunks_to_compress
-                amplifier_data_files = [
-                    p
-                    for p in amplifier_data_files
-                    if any(
-                        chunk_str in p.name
-                        for chunk_str in self.job_settings.chunks_to_compress
-                    )
-                ]
-                if not amplifier_data_files:
-                    raise ValueError(
-                        "No amplifier data files found matching the "
-                        "specified chunks."
-                    )
-            dataset_folder = Path(self.job_settings.input_source)
-            binary_info_json = dataset_folder / "binary_info.json"
-            with open(binary_info_json) as f:
-                binary_info = json.load(f)
-            dtype = binary_info.get("dtype", "uint16")
-            order = (
-                "C" if binary_info.get("time_axis", 0) == 0 else "F"
-            )
-            n_chan = binary_info.get("num_channels", 384)
-            for amp_data_file in amplifier_data_files:
-                data = np.memmap(
-                    filename=str(amp_data_file),
-                    dtype=dtype,
-                    order=order,
-                    mode="r",
-                ).reshape(-1, n_chan)
-                yield {
-                    "data": data,
-                    "relative_path_name": str(
-                        amp_data_file.relative_to(
-                            self.job_settings.input_source
-                        )
-                    ),
-                    "n_chan": n_chan,
-                }
+            # For chronic, we don't have .dat files to clip, so we
+            # return an empty iterator
+            return iter([])
         else:
             stream_names, _ = se.get_neo_streams(
                 self.job_settings.reader_name.value,
                 self.job_settings.input_source,
             )
-            for dat_file in self.job_settings.input_source.glob(
-                "**/*.dat"
-            ):
+            for dat_file in self.job_settings.input_source.glob("**/*.dat"):
                 oe_stream_name = dat_file.parent.name
                 si_stream_name = [
                     stream_name
@@ -417,9 +406,7 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
                 yield {
                     "data": data,
                     "relative_path_name": str(
-                        dat_file.relative_to(
-                            self.job_settings.input_source
-                        )
+                        dat_file.relative_to(self.job_settings.input_source)
                     ),
                     "n_chan": n_chan,
                 }
@@ -450,16 +437,10 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
 
         # Check if original_timestamps.npy files are present
         original_timestamps = [
-            p
-            for p in openephys_folder.glob(
-                "**/original_timestamps.npy"
-            )
+            p for p in openephys_folder.glob("**/original_timestamps.npy")
         ]
         adjusted_timestamps_flag = [
-            p
-            for p in openephys_folder.glob(
-                "**/TIMESTAMPS_ADJUSTED.flag"
-            )
+            p for p in openephys_folder.glob("**/TIMESTAMPS_ADJUSTED.flag")
         ]
 
         if (
@@ -483,10 +464,7 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
             from numcodecs import Blosc
 
             return Blosc(**self.job_settings.compressor_kwargs)
-        elif (
-            self.job_settings.compressor_name
-            == CompressorName.WAVPACK
-        ):
+        elif self.job_settings.compressor_name == CompressorName.WAVPACK:
             from wavpack_numcodecs import WavPack
 
             return WavPack(**self.job_settings.compressor_kwargs)
@@ -529,10 +507,7 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
         for read_block in read_blocks:
             # We don't need to scale the NI-DAQ recordings
             # TODO: Convert this to regex matching?
-            if (
-                RecordingBlockPrefixes.nidaq.value
-                in read_block["stream_name"]
-            ):
+            if RecordingBlockPrefixes.nidaq.value in read_block["stream_name"]:
                 rec_to_compress = read_block["recording"]
             else:
                 correct_lsb_args = {
@@ -579,16 +554,39 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
 
         # first: copy everything except .dat files
         if self.job_settings.reader_name == ReaderName.CHRONIC:
-            # Chronic data does not have .dat files, so we copy everything
-            # except the .dat files
-            patterns_to_ignore = ["*AmplifierData*.bin"]
+            # For chronic data we copy all .bin files except the
+            # AmplifierData.bin files, which are compressed
+            files_to_copy = []
+            for date in self.job_settings.chronic_chunks_to_compress:
+                files_to_copy.extend(
+                    [
+                        p
+                        for p in self.job_settings.input_source.glob(
+                            f"**/*{date}*"
+                        )
+                        if "AmplifierData" not in p.name and p.is_file()
+                    ]
+                )
+            for f in files_to_copy:
+                shutil.copy(
+                    f, dst_dir / f.relative_to(self.job_settings.input_source)
+                )
+
+            if self.job_settings.chronic_start_flag:
+                # Copy the probe.json and binary_info.json files
+                probe_json = self.job_settings.input_source / "probe.json"
+                binary_info_json = (
+                    self.job_settings.input_source / "binary_info.json"
+                )
+                shutil.copy(probe_json, dst_dir / probe_json.name)
+                shutil.copy(binary_info_json, dst_dir / binary_info_json.name)
         elif self.job_settings.reader_name == ReaderName.OPENEPHYS:
             patterns_to_ignore = ["*.dat"]
-        shutil.copytree(
-            self.job_settings.input_source,
-            dst_dir,
-            ignore=shutil.ignore_patterns(*patterns_to_ignore),
-        )
+            shutil.copytree(
+                self.job_settings.input_source,
+                dst_dir,
+                ignore=shutil.ignore_patterns(*patterns_to_ignore),
+            )
         # second: copy clipped dat files
         for stream in stream_gen:
             data = stream["data"]
@@ -649,9 +647,7 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
                 rec = read_block["scaled_recording"]
             experiment_name = read_block["experiment_name"]
             stream_name = read_block["stream_name"]
-            zarr_path = (
-                output_dir / f"{experiment_name}_{stream_name}.zarr"
-            )
+            zarr_path = output_dir / f"{experiment_name}_{stream_name}.zarr"
             if (
                 platform.system() == "Windows"
                 and len(str(zarr_path)) > max_windows_filename_len
@@ -707,16 +703,24 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
                 )
 
         # Clip the data
-        logging.info("Clipping source data. This may take a minute.")
-        clipped_data_path = (
-            self.job_settings.output_directory / "ecephys_clipped"
+        logging.info(
+            "Copying and clipping source data. This may take a minute."
         )
+        if self.job_settings.reader_name == ReaderName.CHRONIC:
+            # For chronic data we are not clpping the data, so we save the
+            # files directly to the output directory
+            clipped_data_path = self.job_settings.output_directory
+        else:
+            # For OpenEphys data we clip the .dat files to a small number of
+            # frames and save it to the "ecephys_clipped" directory
+            clipped_data_path = (
+                self.job_settings.output_directory / "ecephys_clipped"
+            )
         streams_to_clip = self._get_streams_to_clip()
         self._copy_and_clip_data(
             dst_dir=clipped_data_path,
             stream_gen=streams_to_clip,
         )
-
         logging.info("Finished copying and clipping source data.")
 
         # Compress the data
@@ -737,6 +741,9 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
                 ),
                 chunk_size=self.job_settings.scale_chunk_size,
             )
+        else:
+            # For Chronic data, we don't scale the recordings
+            scaled_read_blocks = read_blocks
         self._compress_and_write_block(
             read_blocks=scaled_read_blocks,
             compressor=compressor,
@@ -779,9 +786,7 @@ if __name__ == "__main__":
             cli_args.job_settings
         )
     elif cli_args.config_file is not None:
-        job_settings = EphysJobSettings.from_config_file(
-            cli_args.config_file
-        )
+        job_settings = EphysJobSettings.from_config_file(cli_args.config_file)
     else:
         # Construct settings from env vars
         job_settings = EphysJobSettings()

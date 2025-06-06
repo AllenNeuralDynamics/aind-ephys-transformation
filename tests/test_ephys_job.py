@@ -21,9 +21,7 @@ from aind_ephys_transformation.ephys_job import (
 )
 from aind_ephys_transformation.models import CompressorName
 
-TEST_DIR = (
-    Path(os.path.dirname(os.path.realpath(__file__))) / "resources"
-)
+TEST_DIR = Path(os.path.dirname(os.path.realpath(__file__))) / "resources"
 OE_DATA_DIR = TEST_DIR / "v0.6.x_neuropixels_multiexp_multistream"
 OE_DATA_DIR_NOT_ALIGNED = TEST_DIR / "v0.6.x_neuropixels_not_aligned"
 CHRONIC_DATA_DIR = TEST_DIR / "chronic-test-data"
@@ -41,9 +39,7 @@ class TestEphysJob(unittest.TestCase):
             compress_job_save_kwargs={"n_jobs": 1},
         )
         cls.basic_job_settings = basic_job_settings
-        cls.basic_job = EphysCompressionJob(
-            job_settings=basic_job_settings
-        )
+        cls.basic_job = EphysCompressionJob(job_settings=basic_job_settings)
 
     @patch("warnings.warn")
     def test_get_compressor_default(self, _: MagicMock):
@@ -126,9 +122,7 @@ class TestEphysJob(unittest.TestCase):
         read_blocks_repr = []
         for read_block in read_blocks:
             copied_read_block = read_block
-            copied_read_block["recording"] = repr(
-                read_block["recording"]
-            )
+            copied_read_block["recording"] = repr(read_block["recording"])
             read_blocks_repr.append(copied_read_block)
         extractor_str_1 = (
             "OpenEphysBinaryRecordingExtractor: 8 channels - 30.0kHz "
@@ -192,12 +186,8 @@ class TestEphysJob(unittest.TestCase):
         expected_scaled_read_blocks_str = set(
             [json.dumps(o) for o in expected_read_blocks]
         )
-        read_blocks_repr_str = set(
-            [json.dumps(o) for o in read_blocks_repr]
-        )
-        self.assertEqual(
-            expected_scaled_read_blocks_str, read_blocks_repr_str
-        )
+        read_blocks_repr_str = set([json.dumps(o) for o in read_blocks_repr])
+        self.assertEqual(expected_scaled_read_blocks_str, read_blocks_repr_str)
 
     def test_scale_read_blocks(self):
         """Tests _scale_read_blocks method"""
@@ -296,9 +286,7 @@ class TestEphysJob(unittest.TestCase):
         streams_to_clip_just_shape = []
         for stream_to_clip in streams_to_clip:
             stream_to_clip_copy = {
-                "relative_path_name": stream_to_clip[
-                    "relative_path_name"
-                ],
+                "relative_path_name": stream_to_clip["relative_path_name"],
                 "n_chan": stream_to_clip["n_chan"],
                 "data": stream_to_clip["data"].shape,
             }
@@ -316,95 +304,73 @@ class TestEphysJob(unittest.TestCase):
         expected_output = [
             {
                 "relative_path_name": str(
-                    base_path(1)
-                    / "Neuropix-PXI-100.ProbeB"
-                    / "continuous.dat"
+                    base_path(1) / "Neuropix-PXI-100.ProbeB" / "continuous.dat"
                 ),
                 "n_chan": 384,
                 "data": (100, 384),
             },
             {
                 "relative_path_name": str(
-                    base_path(1)
-                    / "Neuropix-PXI-100.ProbeC"
-                    / "continuous.dat"
+                    base_path(1) / "Neuropix-PXI-100.ProbeC" / "continuous.dat"
                 ),
                 "n_chan": 384,
                 "data": (100, 384),
             },
             {
                 "relative_path_name": str(
-                    base_path(1)
-                    / "NI-DAQmx-103.PXIe-6341"
-                    / "continuous.dat"
+                    base_path(1) / "NI-DAQmx-103.PXIe-6341" / "continuous.dat"
                 ),
                 "n_chan": 8,
                 "data": (100, 8),
             },
             {
                 "relative_path_name": str(
-                    base_path(6)
-                    / "Neuropix-PXI-100.ProbeB"
-                    / "continuous.dat"
+                    base_path(6) / "Neuropix-PXI-100.ProbeB" / "continuous.dat"
                 ),
                 "n_chan": 384,
                 "data": (100, 384),
             },
             {
                 "relative_path_name": str(
-                    base_path(6)
-                    / "Neuropix-PXI-100.ProbeC"
-                    / "continuous.dat"
+                    base_path(6) / "Neuropix-PXI-100.ProbeC" / "continuous.dat"
                 ),
                 "n_chan": 384,
                 "data": (100, 384),
             },
             {
                 "relative_path_name": str(
-                    base_path(6)
-                    / "NI-DAQmx-103.PXIe-6341"
-                    / "continuous.dat"
+                    base_path(6) / "NI-DAQmx-103.PXIe-6341" / "continuous.dat"
                 ),
                 "n_chan": 8,
                 "data": (100, 8),
             },
             {
                 "relative_path_name": str(
-                    base_path(3)
-                    / "NI-DAQmx-103.PXIe-6341"
-                    / "continuous.dat"
+                    base_path(3) / "NI-DAQmx-103.PXIe-6341" / "continuous.dat"
                 ),
                 "n_chan": 8,
                 "data": (100, 8),
             },
             {
                 "relative_path_name": str(
-                    base_path(3)
-                    / "Neuropix-PXI-100.ProbeB"
-                    / "continuous.dat"
+                    base_path(3) / "Neuropix-PXI-100.ProbeB" / "continuous.dat"
                 ),
                 "n_chan": 384,
                 "data": (100, 384),
             },
             {
                 "relative_path_name": str(
-                    base_path(3)
-                    / "Neuropix-PXI-100.ProbeC"
-                    / "continuous.dat"
+                    base_path(3) / "Neuropix-PXI-100.ProbeC" / "continuous.dat"
                 ),
                 "n_chan": 384,
                 "data": (100, 384),
             },
         ]
-        expected_output_str = set(
-            [json.dumps(o) for o in expected_output]
-        )
+        expected_output_str = set([json.dumps(o) for o in expected_output])
         streams_to_clip_just_shape_str = set(
             [json.dumps(o) for o in streams_to_clip_just_shape]
         )
-        self.assertEqual(
-            expected_output_str, streams_to_clip_just_shape_str
-        )
+        self.assertEqual(expected_output_str, streams_to_clip_just_shape_str)
 
     @patch("shutil.copytree")
     @patch("shutil.ignore_patterns")
@@ -430,81 +396,63 @@ class TestEphysJob(unittest.TestCase):
         expected_output = [
             {
                 "relative_path_name": str(
-                    base_path(1)
-                    / "Neuropix-PXI-100.ProbeB"
-                    / "continuous.dat"
+                    base_path(1) / "Neuropix-PXI-100.ProbeB" / "continuous.dat"
                 ),
                 "n_chan": 384,
                 "data": (100, 384),
             },
             {
                 "relative_path_name": str(
-                    base_path(1)
-                    / "Neuropix-PXI-100.ProbeC"
-                    / "continuous.dat"
+                    base_path(1) / "Neuropix-PXI-100.ProbeC" / "continuous.dat"
                 ),
                 "n_chan": 384,
                 "data": (100, 384),
             },
             {
                 "relative_path_name": str(
-                    base_path(1)
-                    / "NI-DAQmx-103.PXIe-6341"
-                    / "continuous.dat"
+                    base_path(1) / "NI-DAQmx-103.PXIe-6341" / "continuous.dat"
                 ),
                 "n_chan": 8,
                 "data": (100, 8),
             },
             {
                 "relative_path_name": str(
-                    base_path(6)
-                    / "Neuropix-PXI-100.ProbeB"
-                    / "continuous.dat"
+                    base_path(6) / "Neuropix-PXI-100.ProbeB" / "continuous.dat"
                 ),
                 "n_chan": 384,
                 "data": (100, 384),
             },
             {
                 "relative_path_name": str(
-                    base_path(6)
-                    / "Neuropix-PXI-100.ProbeC"
-                    / "continuous.dat"
+                    base_path(6) / "Neuropix-PXI-100.ProbeC" / "continuous.dat"
                 ),
                 "n_chan": 384,
                 "data": (100, 384),
             },
             {
                 "relative_path_name": str(
-                    base_path(6)
-                    / "NI-DAQmx-103.PXIe-6341"
-                    / "continuous.dat"
+                    base_path(6) / "NI-DAQmx-103.PXIe-6341" / "continuous.dat"
                 ),
                 "n_chan": 8,
                 "data": (100, 8),
             },
             {
                 "relative_path_name": str(
-                    base_path(3)
-                    / "NI-DAQmx-103.PXIe-6341"
-                    / "continuous.dat"
+                    base_path(3) / "NI-DAQmx-103.PXIe-6341" / "continuous.dat"
                 ),
                 "n_chan": 8,
                 "data": (100, 8),
             },
             {
                 "relative_path_name": str(
-                    base_path(3)
-                    / "Neuropix-PXI-100.ProbeB"
-                    / "continuous.dat"
+                    base_path(3) / "Neuropix-PXI-100.ProbeB" / "continuous.dat"
                 ),
                 "n_chan": 384,
                 "data": (100, 384),
             },
             {
                 "relative_path_name": str(
-                    base_path(3)
-                    / "Neuropix-PXI-100.ProbeC"
-                    / "continuous.dat"
+                    base_path(3) / "Neuropix-PXI-100.ProbeC" / "continuous.dat"
                 ),
                 "n_chan": 384,
                 "data": (100, 384),
@@ -522,9 +470,7 @@ class TestEphysJob(unittest.TestCase):
                 )
             )
             expected_memmap_calls.append(
-                call().__setitem__(
-                    slice(None, None, None), foobar["data"]
-                )
+                call().__setitem__(slice(None, None, None), foobar["data"])
             )
         self.basic_job._copy_and_clip_data(
             dst_dir=Path("."), stream_gen=expected_output
@@ -540,9 +486,7 @@ class TestEphysJob(unittest.TestCase):
         "spikeinterface.extractors.neoextractors.openephys"
         ".OpenEphysBinaryRecordingExtractor.save"
     )
-    @patch(
-        "spikeinterface.preprocessing.normalize_scale.ScaleRecording.save"
-    )
+    @patch("spikeinterface.preprocessing.normalize_scale.ScaleRecording.save")
     def test_compress_and_write_scaled_blocks(
         self,
         mock_scale_save: MagicMock,
@@ -562,15 +506,12 @@ class TestEphysJob(unittest.TestCase):
             self.basic_job.job_settings.compress_max_windows_filename_len
         )
         output_dir = (
-            self.basic_job.job_settings.output_directory
-            / "compressed"
+            self.basic_job.job_settings.output_directory / "compressed"
         )
         output_format = (
             self.basic_job.job_settings.compress_write_output_format
         )
-        job_kwargs = (
-            self.basic_job.job_settings.compress_job_save_kwargs
-        )
+        job_kwargs = self.basic_job.job_settings.compress_job_save_kwargs
         self.basic_job._compress_and_write_block(
             read_blocks=scaled_read_blocks,
             compressor=compressor,
@@ -794,15 +735,12 @@ class TestEphysJob(unittest.TestCase):
             self.basic_job.job_settings.compress_max_windows_filename_len
         )
         output_dir = (
-            self.basic_job.job_settings.output_directory
-            / "compressed"
+            self.basic_job.job_settings.output_directory / "compressed"
         )
         output_format = (
             self.basic_job.job_settings.compress_write_output_format
         )
-        job_kwargs = (
-            self.basic_job.job_settings.compress_job_save_kwargs
-        )
+        job_kwargs = self.basic_job.job_settings.compress_job_save_kwargs
         self.basic_job._compress_and_write_block(
             read_blocks=read_blocks,
             compressor=compressor,
@@ -1026,8 +964,7 @@ class TestEphysJob(unittest.TestCase):
             self.basic_job.job_settings.compress_max_windows_filename_len
         )
         output_dir = (
-            self.basic_job.job_settings.output_directory
-            / "compressed"
+            self.basic_job.job_settings.output_directory / "compressed"
         )
         output_format = (
             self.basic_job.job_settings.compress_write_output_format
@@ -1064,9 +1001,7 @@ class TestEphysJob(unittest.TestCase):
         output_format = (
             self.basic_job.job_settings.compress_write_output_format
         )
-        job_kwargs = (
-            self.basic_job.job_settings.compress_job_save_kwargs
-        )
+        job_kwargs = self.basic_job.job_settings.compress_job_save_kwargs
         with self.assertRaises(Exception) as e:
             self.basic_job._compress_and_write_block(
                 read_blocks=read_blocks,
@@ -1107,7 +1042,9 @@ class TestEphysJob(unittest.TestCase):
         mock_log_info.assert_has_calls(
             [
                 call("Checking timestamps alignment."),
-                call("Clipping source data. This may take a minute."),
+                call(
+                    "Copying and clipping source data. This may take a minute."
+                ),
                 call("Finished copying and clipping source data."),
                 call("Compressing source data."),
                 call("Finished compressing source data."),
@@ -1117,9 +1054,7 @@ class TestEphysJob(unittest.TestCase):
         self.assertEqual(1, len(mock_copy_and_clip_data.mock_calls))
         # More granularity can be added in the future. For now, we just compare
         # the length of the stream_gen list
-        actual_clip_args_derived = mock_copy_and_clip_data.mock_calls[
-            0
-        ].kwargs
+        actual_clip_args_derived = mock_copy_and_clip_data.mock_calls[0].kwargs
         actual_clip_args_derived["stream_gen"] = len(
             list(actual_clip_args_derived["stream_gen"])
         )
@@ -1127,18 +1062,14 @@ class TestEphysJob(unittest.TestCase):
             "stream_gen": 9,
             "dst_dir": Path("output_dir") / "ecephys_clipped",
         }
-        self.assertEqual(
-            expected_clip_args_derived, actual_clip_args_derived
-        )
+        self.assertEqual(expected_clip_args_derived, actual_clip_args_derived)
 
-        self.assertEqual(
-            1, len(mock_compress_and_write_block.mock_calls)
-        )
+        self.assertEqual(1, len(mock_compress_and_write_block.mock_calls))
         # More granularity can be added in the future. For now, we just compare
         # the length of the read_blocks list
-        actual_comp_args_derived = (
-            mock_compress_and_write_block.mock_calls[0].kwargs
-        )
+        actual_comp_args_derived = mock_compress_and_write_block.mock_calls[
+            0
+        ].kwargs
         actual_comp_args_derived["read_blocks"] = len(
             list(actual_comp_args_derived["read_blocks"])
         )
@@ -1157,9 +1088,7 @@ class TestEphysJob(unittest.TestCase):
             "output_format": "zarr",
             "job_kwargs": {"n_jobs": 1},
         }
-        self.assertEqual(
-            expected_comp_args_derived, actual_comp_args_derived
-        )
+        self.assertEqual(expected_comp_args_derived, actual_comp_args_derived)
 
     @patch("aind_ephys_transformation.ephys_job.datetime")
     @patch(
@@ -1218,9 +1147,7 @@ class TestCheckTimeAlignment(unittest.TestCase):
 
     def test_check_alignment(self):
         """Tests check_time_alignment returns False"""
-        timestamps_ok = (
-            self.basic_job_raise._check_timestamps_alignment()
-        )
+        timestamps_ok = self.basic_job_raise._check_timestamps_alignment()
         self.assertFalse(timestamps_ok)
 
     def test_job_failure(self):
@@ -1269,6 +1196,7 @@ class TestChronicCompressJob(unittest.TestCase):
             output_directory=Path("output_dir_chronic"),
             compress_job_save_kwargs={"n_jobs": 1},
             reader_name="chronic",
+            chronic_start_flag=True,
         )
         cls.chronic_job_settings = chronic_job_settings
         cls.chronic_job = EphysCompressionJob(
@@ -1279,12 +1207,11 @@ class TestChronicCompressJob(unittest.TestCase):
             input_source=CHRONIC_DATA_DIR,
             output_directory=Path("output_dir_chronic_append"),
             compress_job_save_kwargs={"n_jobs": 1},
-            chunks_to_compress=["2025-05-13T19-00-00"],
+            chronic_chunks_to_compress=["2025-05-13T19-00-00"],
             reader_name="chronic",
+            chronic_start_flag=True,
         )
-        cls.chronic_job_settings_append1 = (
-            chronic_job_settings_append1
-        )
+        cls.chronic_job_settings_append1 = chronic_job_settings_append1
         cls.chronic_job_append1 = EphysCompressionJob(
             job_settings=chronic_job_settings_append1
         )
@@ -1293,15 +1220,13 @@ class TestChronicCompressJob(unittest.TestCase):
             input_source=CHRONIC_DATA_DIR,
             output_directory=Path("output_dir_chronic_append"),
             compress_job_save_kwargs={"n_jobs": 1},
-            chunks_to_compress=[
+            chronic_chunks_to_compress=[
                 "2025-05-13T20-00-00",
                 "2025-05-13T21-00-00",
             ],
             reader_name="chronic",
         )
-        cls.chronic_job_settings_append2 = (
-            chronic_job_settings_append2
-        )
+        cls.chronic_job_settings_append2 = chronic_job_settings_append2
         cls.chronic_job_append2 = EphysCompressionJob(
             job_settings=chronic_job_settings_append2
         )
@@ -1310,7 +1235,7 @@ class TestChronicCompressJob(unittest.TestCase):
             input_source=CHRONIC_DATA_DIR,
             output_directory=Path("output_dir_chronic_ns"),
             compress_job_save_kwargs={"n_jobs": 1},
-            chunks_to_compress=[
+            chronic_chunks_to_compress=[
                 "2025-05-13T19-00-00",
                 "2025-05-13T21-00-00",
             ],
@@ -1323,10 +1248,10 @@ class TestChronicCompressJob(unittest.TestCase):
 
         chronic_job_settings_filter = EphysJobSettings(
             input_source=CHRONIC_DATA_DIR,
-            output_directory=Path("output_dir_chronic"),
+            output_directory=Path("output_dir_chronic_filter"),
             compress_job_save_kwargs={"n_jobs": 1},
             reader_name="chronic",
-            chunks_to_compress=["2025-05-13T19-00-00"],
+            chronic_chunks_to_compress=["2025-05-13T19-00-00"],
         )
         cls.chronic_job_settings_filter = chronic_job_settings_filter
         cls.chronic_job_filter = EphysCompressionJob(
@@ -1335,28 +1260,24 @@ class TestChronicCompressJob(unittest.TestCase):
 
         chronic_job_settings_no_match = EphysJobSettings(
             input_source=CHRONIC_DATA_DIR,
-            output_directory=Path("output_dir_chronic"),
+            output_directory=Path("output_dir_chronic_no_match"),
             compress_job_save_kwargs={"n_jobs": 1},
             reader_name="chronic",
-            chunks_to_compress=["2024-05-13T19-00-00"],
+            chronic_chunks_to_compress=["2024-05-13T19-00-00"],
         )
-        cls.chronic_job_settings_no_match = (
-            chronic_job_settings_no_match
-        )
+        cls.chronic_job_settings_no_match = chronic_job_settings_no_match
         cls.chronic_job_no_match = EphysCompressionJob(
             job_settings=chronic_job_settings_no_match
         )
 
         chronic_job_settings_multi_match = EphysJobSettings(
             input_source=CHRONIC_DATA_DIR,
-            output_directory=Path("output_dir_chronic"),
+            output_directory=Path("output_dir_chronic_multi_match"),
             compress_job_save_kwargs={"n_jobs": 1},
             reader_name="chronic",
-            chunks_to_compress=["2025-05-13"],
+            chronic_chunks_to_compress=["2025-05-13"],
         )
-        cls.chronic_job_settings_multi_match = (
-            chronic_job_settings_multi_match
-        )
+        cls.chronic_job_settings_multi_match = chronic_job_settings_multi_match
         cls.chronic_job_multi_match = EphysCompressionJob(
             job_settings=chronic_job_settings_multi_match
         )
@@ -1386,9 +1307,7 @@ class TestChronicCompressJob(unittest.TestCase):
         for read_block in read_blocks:
             copied_read_block = read_block
             print(repr(read_block["recording"]))
-            copied_read_block["recording"] = repr(
-                read_block["recording"]
-            )
+            copied_read_block["recording"] = repr(read_block["recording"])
             read_blocks_repr.append(copied_read_block)
         extractor_str = (
             "ConcatenateSegmentRecording: 384 channels - 30.0kHz - 1 segments "
@@ -1405,12 +1324,8 @@ class TestChronicCompressJob(unittest.TestCase):
         expected_scaled_read_blocks_str = set(
             [json.dumps(o) for o in expected_read_blocks]
         )
-        read_blocks_repr_str = set(
-            [json.dumps(o) for o in read_blocks_repr]
-        )
-        self.assertEqual(
-            expected_scaled_read_blocks_str, read_blocks_repr_str
-        )
+        read_blocks_repr_str = set([json.dumps(o) for o in read_blocks_repr])
+        self.assertEqual(expected_scaled_read_blocks_str, read_blocks_repr_str)
 
     def test_get_read_blocks_filter(self):
         """Tests _get_read_blocks method"""
@@ -1420,9 +1335,7 @@ class TestChronicCompressJob(unittest.TestCase):
         read_blocks_repr = []
         for read_block in read_blocks:
             copied_read_block = read_block
-            copied_read_block["recording"] = repr(
-                read_block["recording"]
-            )
+            copied_read_block["recording"] = repr(read_block["recording"])
             read_blocks_repr.append(copied_read_block)
         extractor_str = (
             "ConcatenateSegmentRecording: 384 channels - 30.0kHz - 1 segments "
@@ -1439,12 +1352,8 @@ class TestChronicCompressJob(unittest.TestCase):
         expected_scaled_read_blocks_str = set(
             [json.dumps(o) for o in expected_read_blocks]
         )
-        read_blocks_repr_str = set(
-            [json.dumps(o) for o in read_blocks_repr]
-        )
-        self.assertEqual(
-            expected_scaled_read_blocks_str, read_blocks_repr_str
-        )
+        read_blocks_repr_str = set([json.dumps(o) for o in read_blocks_repr])
+        self.assertEqual(expected_scaled_read_blocks_str, read_blocks_repr_str)
 
     def test_read_blocks_no_match(self):
         """Tests _get_read_blocks method with no matching chunks"""
@@ -1461,147 +1370,31 @@ class TestChronicCompressJob(unittest.TestCase):
         streams_to_clip = self.chronic_job._get_streams_to_clip()
         # TODO: If we want finer granularity, we can compare the numpy.memmap
         #  directly instead of just checking their shape
-        streams_to_clip_just_shape = []
-        for stream_to_clip in streams_to_clip:
-            stream_to_clip_copy = {
-                "relative_path_name": stream_to_clip[
-                    "relative_path_name"
-                ],
-                "n_chan": stream_to_clip["n_chan"],
-                "data": stream_to_clip["data"].shape,
-            }
-            streams_to_clip_just_shape.append(stream_to_clip_copy)
+        assert len(list(streams_to_clip)) == 0
 
-        expected_output = [
-            {
-                "relative_path_name": str(
-                    "OnixEphys/OnixEphys_AmplifierData_2025-05-13T19-00-00.bin"
-                ),
-                "n_chan": 384,
-                "data": (100, 384),
-            },
-            {
-                "relative_path_name": str(
-                    "OnixEphys/OnixEphys_AmplifierData_2025-05-13T20-00-00.bin"
-                ),
-                "n_chan": 384,
-                "data": (100, 384),
-            },
-            {
-                "relative_path_name": str(
-                    "OnixEphys/OnixEphys_AmplifierData_2025-05-13T21-00-00.bin"
-                ),
-                "n_chan": 384,
-                "data": (100, 384),
-            },
-        ]
-        expected_output_str = set(
-            [json.dumps(o) for o in expected_output]
-        )
-        streams_to_clip_just_shape_str = set(
-            [json.dumps(o) for o in streams_to_clip_just_shape]
-        )
-        self.assertEqual(
-            expected_output_str, streams_to_clip_just_shape_str
-        )
-
-        streams_to_clip_filter = self.chronic_job_filter._get_streams_to_clip()
-        streams_to_clip_just_shape = []
-        for stream_to_clip in streams_to_clip_filter:
-            stream_to_clip_copy = {
-                "relative_path_name": stream_to_clip[
-                    "relative_path_name"
-                ],
-                "n_chan": stream_to_clip["n_chan"],
-                "data": stream_to_clip["data"].shape,
-            }
-            streams_to_clip_just_shape.append(stream_to_clip_copy)
-
-        expected_output = [
-            {
-                "relative_path_name": str(
-                    "OnixEphys/OnixEphys_AmplifierData_2025-05-13T19-00-00.bin"
-                ),
-                "n_chan": 384,
-                "data": (100, 384),
-            }
-        ]
-        expected_output_str = set(
-            [json.dumps(o) for o in expected_output]
-        )
-        streams_to_clip_just_shape_str = set(
-            [json.dumps(o) for o in streams_to_clip_just_shape]
-        )
-        self.assertEqual(
-            expected_output_str, streams_to_clip_just_shape_str
-        )
-
-        with self.assertRaises(ValueError):
-            list(self.chronic_job_no_match._get_streams_to_clip())
-
-    @patch("shutil.copytree")
-    @patch("shutil.ignore_patterns")
-    @patch("numpy.memmap")
+    @patch("shutil.copy")
     def test_copy_and_clip_data(
         self,
-        mock_memmap: MagicMock,
-        mock_ignore_patterns: MagicMock,
-        mock_copy_tree: MagicMock,
+        mock_copy: MagicMock,
     ):
         """Tests _copy_and_clip_data method"""
-        mock_ignore_patterns.return_value = ["*AmplifierData*.bin"]
-
-        expected_output = [
-            {
-                "relative_path_name": str(
-                    "OnixEphys/OnixEphys_AmplifierData_2025-05-13T19-00-00.bin"
-                ),
-                "n_chan": 384,
-                "data": (100, 384),
-            },
-            {
-                "relative_path_name": str(
-                    "OnixEphys/OnixEphys_AmplifierData_2025-05-13T20-00-00.bin"
-                ),
-                "n_chan": 384,
-                "data": (100, 384),
-            },
-            {
-                "relative_path_name": str(
-                    "OnixEphys/OnixEphys_AmplifierData_2025-05-13T21-00-00.bin"
-                ),
-                "n_chan": 384,
-                "data": (100, 384),
-            },
-        ]
-        expected_memmap_calls = []
-        for foobar in expected_output:
-            expected_memmap_calls.append(
-                call(
-                    filename=Path(foobar["relative_path_name"]),
-                    dtype="int16",
-                    shape=foobar["data"],
-                    order="C",
-                    mode="w+",
-                )
-            )
-            expected_memmap_calls.append(
-                call().__setitem__(
-                    slice(None, None, None), foobar["data"]
-                )
-            )
         self.chronic_job._copy_and_clip_data(
-            dst_dir=Path("."), stream_gen=expected_output
+            dst_dir=Path("."), stream_gen=iter([])
         )
-        mock_ignore_patterns.assert_called_once_with(
-            "*AmplifierData*.bin"
-        )
-        mock_copy_tree.assert_called_once_with(
-            CHRONIC_DATA_DIR,
-            Path("."),
-            ignore=["*AmplifierData*.bin"],
-        )
-        mock_memmap.assert_has_calls(expected_memmap_calls)
+        all_files_to_copy = [
+            p
+            for p in self.chronic_job.job_settings.input_source.glob("**/*")
+            if p.is_file() and "AmplifierData" not in p.name
+        ]
+        expected_copy_calls = [
+            call(
+                p,
+                Path(".")
+                / p.relative_to(self.chronic_job.job_settings.input_source),
+            )
+            for p in all_files_to_copy
+        ]
+        mock_copy.assert_has_calls(expected_copy_calls, any_order=True)
 
     @patch("warnings.warn")
     def test_compress_and_write_read_blocks(
@@ -1612,8 +1405,7 @@ class TestChronicCompressJob(unittest.TestCase):
         read_blocks = self.chronic_job._get_read_blocks()
         compressor = self.chronic_job._get_compressor()
         output_dir = (
-            self.chronic_job.job_settings.output_directory
-            / "compressed"
+            self.chronic_job.job_settings.output_directory / "compressed"
         )
         output_format = (
             self.chronic_job.job_settings.compress_write_output_format
@@ -1621,9 +1413,7 @@ class TestChronicCompressJob(unittest.TestCase):
         max_windows_filename_len = (
             self.chronic_job.job_settings.compress_max_windows_filename_len
         )
-        job_kwargs = (
-            self.chronic_job.job_settings.compress_job_save_kwargs
-        )
+        job_kwargs = self.chronic_job.job_settings.compress_job_save_kwargs
         self.chronic_job._compress_and_write_block(
             read_blocks=read_blocks,
             compressor=compressor,
@@ -1660,9 +1450,7 @@ class TestChronicCompressJob(unittest.TestCase):
         max_windows_filename_len = (
             self.chronic_job.job_settings.compress_max_windows_filename_len
         )
-        job_kwargs = (
-            self.chronic_job.job_settings.compress_job_save_kwargs
-        )
+        job_kwargs = self.chronic_job.job_settings.compress_job_save_kwargs
         self.chronic_job_append1._compress_and_write_block(
             read_blocks=read_blocks1,
             compressor=compressor,
@@ -1711,6 +1499,78 @@ class TestChronicCompressJob(unittest.TestCase):
             timestamps_ok,
             "Timestamps should be aligned for chronic data.",
         )
+
+    @patch("warnings.warn")
+    @patch(
+        "aind_ephys_transformation.ephys_job.EphysCompressionJob"
+        "._compress_and_write_block"
+    )
+    @patch(
+        "aind_ephys_transformation.ephys_job.EphysCompressionJob"
+        "._copy_and_clip_data"
+    )
+    @patch("logging.info")
+    def test_compress_raw_data(
+        self,
+        mock_log_info: MagicMock,
+        mock_copy_and_clip_data: MagicMock,
+        mock_compress_and_write_block: MagicMock,
+        _: MagicMock,
+    ):
+        """Tests _compress_raw_data method with basic job"""
+        self.chronic_job._compress_raw_data()
+        mock_log_info.assert_has_calls(
+            [
+                call("Checking timestamps alignment."),
+                call(
+                    "Copying and clipping source data. This may take a minute."
+                ),
+                call("Finished copying and clipping source data."),
+                call("Compressing source data."),
+                call("Finished compressing source data."),
+            ],
+            any_order=True,
+        )
+        self.assertEqual(1, len(mock_copy_and_clip_data.mock_calls))
+        # More granularity can be added in the future. For now, we just compare
+        # the length of the stream_gen list
+        actual_clip_args_derived = mock_copy_and_clip_data.mock_calls[0].kwargs
+        actual_clip_args_derived["stream_gen"] = len(
+            list(actual_clip_args_derived["stream_gen"])
+        )
+        expected_clip_args_derived = {
+            "stream_gen": 0,
+            "dst_dir": self.chronic_job.job_settings.output_directory,
+        }
+        self.assertEqual(expected_clip_args_derived, actual_clip_args_derived)
+
+        self.assertEqual(1, len(mock_compress_and_write_block.mock_calls))
+        # More granularity can be added in the future. For now, we just compare
+        # the length of the read_blocks list
+        actual_comp_args_derived = mock_compress_and_write_block.mock_calls[
+            0
+        ].kwargs
+        actual_comp_args_derived["read_blocks"] = len(
+            list(actual_comp_args_derived["read_blocks"])
+        )
+        expected_comp_args_derived = {
+            "read_blocks": 1,
+            "compressor": WavPack(
+                bps=0,
+                dynamic_noise_shaping=True,
+                level=3,
+                num_decoding_threads=8,
+                num_encoding_threads=1,
+                shaping_weight=0.0,
+            ),
+            "max_windows_filename_len": 150,
+            "output_dir": 
+                self.chronic_job.job_settings.output_directory / 
+                "ecephys_compressed",
+            "output_format": "zarr",
+            "job_kwargs": {"n_jobs": 1},
+        }
+        self.assertEqual(expected_comp_args_derived, actual_comp_args_derived)
 
 
 if __name__ == "__main__":

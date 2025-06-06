@@ -1,4 +1,5 @@
 """Compression utilities for writing recordings to Zarr format."""
+
 from __future__ import annotations
 from pathlib import Path
 import numpy as np
@@ -24,9 +25,20 @@ def write_or_append_recording_to_zarr(
     zarr_root = zarr.open(
         str(folder_path), mode="a", storage_options=storage_options
     )
+    if recording.get_num_segments() > 1:
+        raise ValueError(
+            "write_or_append_recording_to_zarr does not support "
+            "multi-segment recordings."
+        )
+    global_start_frame = recording.get_annotation(
+        "sample_index_from_session_start"
+    )
+    if global_start_frame is None:
+        global_start_frame = 0
     add_or_append_recording_to_zarr_group(
         recording,
         zarr_root,
+        global_start_frame=global_start_frame,
         annotations_to_update=annotations_to_update,
         **kwargs,
     )
@@ -37,38 +49,31 @@ def add_or_append_recording_to_zarr_group(  # noqa: C901
     zarr_group: zarr.hierarchy.Group,
     verbose=False,
     dtype=None,
+    global_start_frame=0,
     annotations_to_update=None,
     **kwargs,
 ):
     """Add or append a recording to a Zarr group."""
     zarr_kwargs, job_kwargs = split_job_kwargs(kwargs)
 
-    if recording.check_if_json_serializable():
-        zarr_group.attrs["provenance"] = check_json(
-            recording.to_dict(recursive=True)
-        )
-    else:
-        zarr_group.attrs["provenance"] = None
+    # we don't write the provenance since the recording keeps growing
+    zarr_group.attrs["provenance"] = None
 
     # save data (done the subclass)
-    zarr_group.attrs["sampling_frequency"] = float(
-        recording.get_sampling_frequency()
-    )
-    zarr_group.attrs["num_segments"] = int(
-        recording.get_num_segments()
-    )
-    dataset_paths = [
-        f"traces_seg{i}" for i in range(recording.get_num_segments())
-    ]
+    if "sampling_frequency" not in zarr_group.attrs:
+        zarr_group.attrs["sampling_frequency"] = float(
+            recording.get_sampling_frequency()
+        )
+    if "num_channels" not in zarr_group.attrs:
+        zarr_group.attrs["num_segments"] = 1
+    dataset_paths = [f"traces_seg{0}"]
 
     dtype = recording.get_dtype() if dtype is None else dtype
     channel_chunk_size = zarr_kwargs.get("channel_chunk_size", None)
     global_compressor = zarr_kwargs.pop(
         "compressor", get_default_zarr_compressor()
     )
-    compressor_by_dataset = zarr_kwargs.pop(
-        "compressor_by_dataset", {}
-    )
+    compressor_by_dataset = zarr_kwargs.pop("compressor_by_dataset", {})
     global_filters = zarr_kwargs.pop("filters", None)
     filters_by_dataset = zarr_kwargs.pop("filters_by_dataset", {})
 
@@ -79,9 +84,7 @@ def add_or_append_recording_to_zarr_group(  # noqa: C901
             compressor=None,
         )
 
-    compressor_traces = compressor_by_dataset.get(
-        "traces", global_compressor
-    )
+    compressor_traces = compressor_by_dataset.get("traces", global_compressor)
     filters_traces = filters_by_dataset.get("traces", global_filters)
     add_or_append_traces_to_zarr(
         recording=recording,
@@ -91,6 +94,7 @@ def add_or_append_recording_to_zarr_group(  # noqa: C901
         filters=filters_traces,
         dtype=dtype,
         channel_chunk_size=channel_chunk_size,
+        global_start_frame=global_start_frame,
         verbose=verbose,
         **job_kwargs,
     )
@@ -104,10 +108,7 @@ def add_or_append_recording_to_zarr_group(  # noqa: C901
             )
 
     # save time vector if any
-    t_starts = (
-        np.zeros(recording.get_num_segments(), dtype="float64")
-        * np.nan
-    )
+    t_starts = np.zeros(recording.get_num_segments(), dtype="float64") * np.nan
     for segment_index, rs in enumerate(recording._recording_segments):
         d = rs.get_times_kwargs()
         time_vector = d["time_vector"]
@@ -115,9 +116,7 @@ def add_or_append_recording_to_zarr_group(  # noqa: C901
         compressor_times = compressor_by_dataset.get(
             "times", global_compressor
         )
-        filters_times = filters_by_dataset.get(
-            "times", global_filters
-        )
+        filters_times = filters_by_dataset.get("times", global_filters)
 
         if time_vector is not None:
             time_dset_name = f"times_seg{segment_index}"
@@ -130,9 +129,7 @@ def add_or_append_recording_to_zarr_group(  # noqa: C901
                 )
             else:
                 time_dset = zarr_group[time_dset_name]
-                time_dset.resize(
-                    (time_dset.shape[0] + len(time_vector),)
-                )
+                time_dset.resize((time_dset.shape[0] + len(time_vector),))
                 time_dset[-len(time_vector):] = time_vector
 
         elif d["t_start"] is not None:
@@ -163,6 +160,7 @@ def add_or_append_traces_to_zarr(
     dtype=None,
     compressor=None,
     filters=None,
+    global_start_frame=0,
     verbose=False,
     **job_kwargs,
 ):
@@ -185,6 +183,8 @@ def add_or_append_traces_to_zarr(
         Zarr compressor
     filters : list, default: None
         List of zarr filters
+    global_start_frame : int, default: 0
+        The global start frame to use for appending traces.
     verbose : bool, default: False
         If True, output is verbose (when chunks are used)
     {}
@@ -197,8 +197,6 @@ def add_or_append_traces_to_zarr(
 
     assert dataset_paths is not None, "Provide 'file_path'"
 
-    assert len(dataset_paths) == recording.get_num_segments()
-
     dtype = recording.get_dtype()
 
     job_kwargs = fix_job_kwargs(job_kwargs)
@@ -206,34 +204,30 @@ def add_or_append_traces_to_zarr(
 
     # create zarr datasets files
     zarr_datasets = []
-    global_start_frames = []
-    for segment_index in range(recording.get_num_segments()):
-        num_frames = recording.get_num_samples(segment_index)
-        num_channels = recording.get_num_channels()
-        dset_name = dataset_paths[segment_index]
-        shape = (num_frames, num_channels)
-        if dset_name in zarr_group:
-            dset = zarr_group[dset_name]
-            global_start_frame = dset.shape[0]
-            dset.resize((dset.shape[0] + num_frames, num_channels))
-        else:
-            dset = zarr_group.create_dataset(
-                name=dset_name,
-                shape=shape,
-                chunks=(chunk_size, channel_chunk_size),
-                dtype=dtype,
-                filters=filters,
-                compressor=compressor,
-            )
-            global_start_frame = 0
-        global_start_frames.append(global_start_frame)
-        zarr_datasets.append(dset)
-        # synchronizer=zarr.ThreadSynchronizer())
+    # only 1 segment supported
+    segment_index = 0
+    num_frames = recording.get_num_samples(segment_index)
+    num_channels = recording.get_num_channels()
+    dset_name = dataset_paths[segment_index]
+    shape = (num_frames, num_channels)
+    if dset_name in zarr_group:
+        dset = zarr_group[dset_name]
+        dset.resize((global_start_frame + num_frames, num_channels))
+    else:
+        dset = zarr_group.create_dataset(
+            name=dset_name,
+            shape=shape,
+            chunks=(chunk_size, channel_chunk_size),
+            dtype=dtype,
+            filters=filters,
+            compressor=compressor,
+        )
+    zarr_datasets.append(dset)
 
     # use executor (loop or workers)
     func = _write_zarr_chunk_append
     init_func = _init_zarr_worker_append
-    init_args = (recording, zarr_datasets, dtype, global_start_frames)
+    init_args = (recording, zarr_datasets, dtype, global_start_frame)
     executor = ChunkRecordingExecutor(
         recording,
         func,
@@ -248,7 +242,7 @@ def add_or_append_traces_to_zarr(
 
 # used by write_zarr_recording + ChunkRecordingExecutor
 def _init_zarr_worker_append(
-    recording, zarr_datasets, dtype, global_start_frames
+    recording, zarr_datasets, dtype, global_start_frame
 ):
     """Initialize the worker context for appending to Zarr."""
 
@@ -257,7 +251,7 @@ def _init_zarr_worker_append(
     worker_ctx["recording"] = recording
     worker_ctx["zarr_datasets"] = zarr_datasets
     worker_ctx["dtype"] = np.dtype(dtype)
-    worker_ctx["global_start_frames"] = global_start_frames
+    worker_ctx["global_start_frame"] = global_start_frame
 
     return worker_ctx
 
@@ -273,9 +267,7 @@ def _write_zarr_chunk_append(
     recording = worker_ctx["recording"]
     dtype = worker_ctx["dtype"]
     zarr_dataset = worker_ctx["zarr_datasets"][segment_index]
-    global_start_frame = worker_ctx["global_start_frames"][
-        segment_index
-    ]
+    global_start_frame = worker_ctx["global_start_frame"]
 
     # apply function
     traces = recording.get_traces(

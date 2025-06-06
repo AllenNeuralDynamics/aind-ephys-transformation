@@ -25,15 +25,8 @@ class TestCompressionUtils(unittest.TestCase):
         cls.recording2, _ = generate_ground_truth_recording(
             durations=[20], seed=2205
         )
-        cls.recording_multi_segment1, _ = (
-            generate_ground_truth_recording(
-                durations=[10, 5], seed=2308
-            )
-        )
-        cls.recording_multi_segment2, _ = (
-            generate_ground_truth_recording(
-                durations=[20, 15], seed=2308
-            )
+        cls.recording2.annotate(
+            sample_index_from_session_start=cls.recording1.get_num_samples()
         )
         cls.tmp_path = Path("tmp_test_ephys_compression_utils")
 
@@ -82,9 +75,7 @@ class TestCompressionUtils(unittest.TestCase):
 
         # First half should match original data
         np.testing.assert_array_equal(
-            zarr_data["traces_seg0"][
-                : self.recording1.get_num_samples()
-            ],
+            zarr_data["traces_seg0"][: self.recording1.get_num_samples()],
             self.recording1.get_traces(),
         )
         # Second half should match appended data
@@ -92,78 +83,6 @@ class TestCompressionUtils(unittest.TestCase):
             zarr_data["traces_seg0"][self.recording1.get_num_samples():],
             self.recording2.get_traces(),
         )
-
-    def test_write_multiple_segments(self):
-        """Test writing multiple segments."""
-        # Create recording with two segments
-        temp_zarr_path = self.tmp_path / "multi_segment.zarr"
-
-        # Write first recording
-        write_or_append_recording_to_zarr(
-            self.recording_multi_segment1, temp_zarr_path, n_jobs=2
-        )
-
-        zarr_data = zarr.open(str(temp_zarr_path), mode="r")
-
-        for segment_index in range(
-            self.recording_multi_segment1.get_num_segments()
-        ):
-            # Verify the data was written correctly
-            np.testing.assert_array_equal(
-                zarr_data[f"traces_seg{segment_index}"][:],
-                self.recording_multi_segment1.get_traces(
-                    segment_index=segment_index
-                ),
-            )
-
-    def test_append_multiple_segments(self):
-        """Test appending multiple segments to an existing zarr file."""
-        temp_zarr_path = self.tmp_path / "multi_segment2.zarr"
-
-        # Write first recording
-        write_or_append_recording_to_zarr(
-            self.recording_multi_segment1,
-            temp_zarr_path,
-        )
-        # Append second recording
-        write_or_append_recording_to_zarr(
-            self.recording_multi_segment2, temp_zarr_path
-        )
-
-        # Verify both segments
-        zarr_data = zarr.open(str(temp_zarr_path), mode="r")
-        for segment_index in range(
-            self.recording_multi_segment1.get_num_segments()
-        ):
-            segment_traces1 = (
-                self.recording_multi_segment1.get_traces(
-                    segment_index
-                )
-            )
-            segment_traces2 = (
-                self.recording_multi_segment2.get_traces(
-                    segment_index
-                )
-            )
-            segment_name = f"traces_seg{segment_index}"
-
-            num_samples1 = (
-                self.recording_multi_segment1.get_num_samples(
-                    segment_index
-                )
-            )
-
-            # first recording
-            if segment_index == 0:
-                np.testing.assert_array_equal(
-                    zarr_data[segment_name][:num_samples1],
-                    segment_traces1,
-                )
-            else:
-                np.testing.assert_array_equal(
-                    zarr_data[segment_name][num_samples1:],
-                    segment_traces2,
-                )
 
     def test_append_with_times(self):
         """Test appending recordings with time vectors."""
@@ -210,24 +129,18 @@ class TestCompressionUtils(unittest.TestCase):
 
         # Verify t_start is saved correctly
         zarr_data = zarr.open(temp_zarr_path, mode="r")
-        np.testing.assert_array_equal(
-            zarr_data["t_starts"], np.array([50.0])
+        np.testing.assert_array_equal(zarr_data["t_starts"], np.array([50.0]))
+
+    def test_raise_with_multi_segment_recording(self):
+        """Test that an error is raised for multi-segment recordings."""
+        # Create a recording with multiple segments
+        recording_multi_segment, _ = generate_ground_truth_recording(
+            durations=[10, 20], seed=2308
         )
 
-    def test_with_provenance(self):
-        """Test writing a recording with provenance."""
-        temp_zarr_path = self.tmp_path / "test_provenance.zarr"
+        temp_zarr_path = self.tmp_path / "test_multi_segment.zarr"
 
-        # Set provenance for the recording
-        recording2 = self.recording1.save(
-            folder=self.tmp_path / "cached"
-        )
-
-        # Write the recording
-        write_or_append_recording_to_zarr(
-            recording2, temp_zarr_path, n_jobs=2
-        )
-
-        # Verify provenance is saved correctly
-        zarr_data = zarr.open(temp_zarr_path, mode="r")
-        zarr_data.attrs["provenance"] is not None
+        with self.assertRaises(ValueError):
+            write_or_append_recording_to_zarr(
+                recording_multi_segment, temp_zarr_path, n_jobs=2
+            )
