@@ -567,8 +567,11 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
                         if "AmplifierData" not in p.name and p.is_file()
                     ]
                 )
-            dst_dir.mkdir(parents=True, exist_ok=True)
             for f in files_to_copy:
+                dst_file_path = dst_dir / f.relative_to(
+                    self.job_settings.input_source
+                )
+                dst_file_path.parent.mkdir(parents=True, exist_ok=True)
                 shutil.copy(
                     f, dst_dir / f.relative_to(self.job_settings.input_source)
                 )
