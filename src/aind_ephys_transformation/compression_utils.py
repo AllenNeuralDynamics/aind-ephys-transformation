@@ -129,8 +129,13 @@ def add_or_append_recording_to_zarr_group(  # noqa: C901
                 )
             else:
                 time_dset = zarr_group[time_dset_name]
-                time_dset.resize((time_dset.shape[0] + len(time_vector),))
-                time_dset[-len(time_vector):] = time_vector
+                if len(time_dset) < global_start_frame + len(time_vector):
+                    # Resize the dataset if it is smaller than expected
+                    time_dset.resize(
+                        (global_start_frame + len(time_vector),)
+                    )
+                global_end_frame = global_start_frame + len(time_vector)
+                time_dset[global_start_frame:global_end_frame] = time_vector
 
         elif d["t_start"] is not None:
             t_starts[segment_index] = d["t_start"]
@@ -212,7 +217,8 @@ def add_or_append_traces_to_zarr(
     shape = (num_frames, num_channels)
     if dset_name in zarr_group:
         dset = zarr_group[dset_name]
-        dset.resize((global_start_frame + num_frames, num_channels))
+        if dset.shape[0] < global_start_frame + num_frames:
+            dset.resize((global_start_frame + num_frames, num_channels))
     else:
         dset = zarr_group.create_dataset(
             name=dset_name,
