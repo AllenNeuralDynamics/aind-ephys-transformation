@@ -20,10 +20,10 @@ class TestCompressionUtils(unittest.TestCase):
     def setUpClass(cls):
         """Setup basic job settings and job that can be used across tests"""
         cls.recording1, _ = generate_ground_truth_recording(
-            durations=[10], seed=2308
+            durations=[10.2], seed=2308
         )
         cls.recording2, _ = generate_ground_truth_recording(
-            durations=[20], seed=2205
+            durations=[20.5], seed=2205
         )
         cls.recording2.annotate(
             sample_index_from_session_start=cls.recording1.get_num_samples()

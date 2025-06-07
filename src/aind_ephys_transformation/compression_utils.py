@@ -131,9 +131,7 @@ def add_or_append_recording_to_zarr_group(  # noqa: C901
                 time_dset = zarr_group[time_dset_name]
                 if len(time_dset) < global_start_frame + len(time_vector):
                     # Resize the dataset if it is smaller than expected
-                    time_dset.resize(
-                        (global_start_frame + len(time_vector),)
-                    )
+                    time_dset.resize((global_start_frame + len(time_vector),))
                 global_end_frame = global_start_frame + len(time_vector)
                 time_dset[global_start_frame:global_end_frame] = time_vector
 
@@ -250,9 +248,7 @@ def add_or_append_traces_to_zarr(
 
 
 def get_recording_slices_aligned_to_zarr_chunks(
-    recording: BaseRecording,
-    chunk_size: int,
-    global_start_frame: int = 0
+    recording: BaseRecording, chunk_size: int, global_start_frame: int = 0
 ):
     """
     This function returns a list of tuples representing slices of the recording
@@ -286,7 +282,11 @@ def get_recording_slices_aligned_to_zarr_chunks(
     chunks = divide_segment_into_chunks(num_frames, chunk_size)
     recording_slices.extend(
         [
-            (segment_index, frame_start, frame_stop)
+            (
+                segment_index,
+                frame_start + first_chunk_size,
+                frame_stop + first_chunk_size,
+            )
             for frame_start, frame_stop in chunks
         ]
     )
