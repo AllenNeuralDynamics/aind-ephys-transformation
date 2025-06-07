@@ -243,7 +243,54 @@ def add_or_append_traces_to_zarr(
         job_name="write_zarr_recording",
         **job_kwargs,
     )
-    executor.run()
+    recording_slices = get_recording_slices_aligned_to_zarr_chunks(
+        recording, chunk_size, global_start_frame
+    )
+    executor.run(recording_slices=recording_slices)
+
+
+def get_recording_slices_aligned_to_zarr_chunks(
+    recording: BaseRecording,
+    chunk_size: int,
+    global_start_frame: int = 0
+):
+    """
+    This function returns a list of tuples representing slices of the recording
+    that are aligned to Zarr chunks.
+    Normally, each job writes to a different chunk, except for the last one
+    which may be smaller than the chunk size. When appending, we need to make
+    sure that the first appended chunk "completes" the previous one, so that
+    additional chunks will be aligned to the chunk size.
+
+    Parameters
+    ----------
+    recording : BaseRecording
+        The recording extractor object.
+    chunk_size : int
+        The size of the chunks in frames.
+    global_start_frame : int, default: 0
+        The global start frame to use for appending traces.
+
+    Returns
+    -------
+    recording_slices : list of tuples
+        A list of tuples where each tuple represents a segment of the recording
+        aligned to Zarr chunks.
+    """
+    from spikeinterface.core.job_tools import divide_segment_into_chunks
+
+    segment_index = 0
+    first_chunk_size = chunk_size - global_start_frame % chunk_size
+    recording_slices = [(segment_index, 0, first_chunk_size)]
+    num_frames = recording.get_num_samples(segment_index) - first_chunk_size
+    chunks = divide_segment_into_chunks(num_frames, chunk_size)
+    recording_slices.extend(
+        [
+            (segment_index, frame_start, frame_stop)
+            for frame_start, frame_stop in chunks
+        ]
+    )
+    return recording_slices
 
 
 # used by write_zarr_recording + ChunkRecordingExecutor
