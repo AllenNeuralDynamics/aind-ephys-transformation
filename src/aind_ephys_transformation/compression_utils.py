@@ -150,9 +150,10 @@ def add_or_append_recording_to_zarr_group(  # noqa: C901
         for key in annotations_to_update:
             value = recording.get_annotation(key)
             if key in zarr_group.attrs:
-                zarr_group.attrs[key].update(value)
-            else:
-                zarr_group.attrs[key] = value
+                new_value = zarr_group.attrs[key]
+                new_value.update(value)
+                value = new_value
+            zarr_group.attrs[key] = value
 
 
 def add_or_append_traces_to_zarr(
