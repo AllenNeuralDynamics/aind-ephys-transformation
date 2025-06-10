@@ -592,20 +592,18 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
                     ]
                 )
             for f in files_to_copy:
-                dst_file_path = dst_dir / f.relative_to(
+                dst_file_path = f.relative_to(
                     self.job_settings.input_source
                 )
                 if self.job_settings.s3_location is not None:
                     copy_file_to_s3(
                         f,
-                        f"{self.job_settings.s3_location}/{dst_file_path.name}"
+                        f"{self.job_settings.s3_location}/{dst_file_path}"
                     )
                 else:
-                    dst_file_path.parent.mkdir(parents=True, exist_ok=True)
-                    shutil.copy(
-                        f,
-                        dst_dir / f.relative_to(self.job_settings.input_source)
-                    )
+                    dst_path = dst_dir / dst_file_path
+                    dst_path.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy(f, dst_path)
 
             if self.job_settings.chronic_start_flag:
                 # Copy the probe.json and binary_info.json files
@@ -660,12 +658,9 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
                 )
                 dst_data[:] = data[: self.job_settings.clip_n_frames]
                 if self.job_settings.s3_location is not None:
-                    dst_location = dst_raw_file.relative_to(
-                        self.job_settings.output_directory
-                    )
                     copy_file_to_s3(
                         dst_raw_file,
-                        f"{self.job_settings.s3_location}/{dst_location}"
+                        f"{self.job_settings.s3_location}/{rel_path_name}"
                     )
                     # remove local file after copying to S3
                     dst_raw_file.unlink()
