@@ -1572,6 +1572,76 @@ class TestChronicCompressJob(unittest.TestCase):
         }
         self.assertEqual(expected_comp_args_derived, actual_comp_args_derived)
 
+    @patch("aind_ephys_transformation.compression_utils.write_or_append_recording_to_zarr")
+    @patch("aind_ephys_transformation.ephys_job.sync_dir_to_s3")
+    @patch("aind_ephys_transformation.ephys_job.copy_file_to_s3")
+    def test_s3_location(
+        self,
+        mock_copy_file_to_s3: MagicMock,
+        mock_sync_dir_to_s3: MagicMock,
+        mock_write_or_append_recording_to_zarr: MagicMock,
+    ):
+        """Tests S3 location generation for chronic recordings"""
+        job_settings_s3 = EphysJobSettings(
+            input_source=CHRONIC_DATA_DIR,
+            output_directory=Path("output_dir_s3"),
+            compress_job_save_kwargs={"n_jobs": 1},
+            s3_location="s3://bucket/path/to/data/",  # Validator will strip trailing /
+            reader_name="chronic",
+            chronic_start_flag=True,
+        )
+        # s3_location will be "s3://bucket/path/to/data" after validation
+        expected_s3_base = "s3://bucket/path/to/data"
+
+        chronic_job_s3 = EphysCompressionJob(job_settings=job_settings_s3)
+
+        chronic_job_s3._compress_raw_data()
+
+        mock_sync_dir_to_s3.assert_not_called()
+
+        # Assert calls to copy_file_to_s3
+        expected_copy_calls = [
+            call(
+                CHRONIC_DATA_DIR / "OnixEphys_2025-05-13T19-00-00" / "OnixEphys_Clock_2025-05-13T19-00-00.bin",
+                f"{expected_s3_base}/OnixEphys_Clock_2025-05-13T19-00-00.bin",
+            ),
+            call(
+                CHRONIC_DATA_DIR / "OnixEphys_2025-05-13T20-00-00" / "OnixEphys_Clock_2025-05-13T20-00-00.bin",
+                f"{expected_s3_base}/OnixEphys_Clock_2025-05-13T20-00-00.bin",
+            ),
+            call(
+                CHRONIC_DATA_DIR / "OnixEphys_2025-05-13T21-00-00" / "OnixEphys_Clock_2025-05-13T21-00-00.bin",
+                f"{expected_s3_base}/OnixEphys_Clock_2025-05-13T21-00-00.bin",
+            ),
+            call(
+                CHRONIC_DATA_DIR / "probe.json",
+                f"{expected_s3_base}/probe.json",
+            ),
+            call(
+                CHRONIC_DATA_DIR / "binary_info.json",
+                f"{expected_s3_base}/binary_info.json",
+            ),
+        ]
+        mock_copy_file_to_s3.assert_has_calls(expected_copy_calls, any_order=True)
+        self.assertEqual(mock_copy_file_to_s3.call_count, 5)
+
+        # Assert call to write_or_append_recording_to_zarr
+        expected_zarr_s3_path = f"{expected_s3_base}/ecephys_compressed/experiment1_AmplifierData.zarr"
+        
+        mock_write_or_append_recording_to_zarr.assert_called_once()
+        
+        # Get the arguments of the call to the mock
+        # call_args is a tuple (pos_args, named_args)
+        _args, kwargs = mock_write_or_append_recording_to_zarr.call_args
+        
+        self.assertEqual(kwargs.get("folder_path"), expected_zarr_s3_path)
+        self.assertIn("recording", kwargs) 
+        self.assertIsInstance(kwargs.get("compressor"), WavPack) 
+        self.assertEqual(kwargs.get("compressor_by_dataset"), {"times": None})
+        self.assertEqual(kwargs.get("annotations_to_update"), ["start_end_frames"])
+        # n_jobs comes from job_settings.compress_job_save_kwargs
+        self.assertEqual(kwargs.get("n_jobs"), 1)
+
 
 if __name__ == "__main__":
     unittest.main()
