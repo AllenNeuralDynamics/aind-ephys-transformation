@@ -1726,7 +1726,7 @@ class TestChronicCompressJob(unittest.TestCase):
         job_settings_s3 = EphysJobSettings(
             input_source=CHRONIC_DATA_DIR,
             output_directory=Path("output_dir_s3"),
-            compress_job_save_kwargs={"n_jobs": 1},
+            compress_job_save_kwargs={"n_jobs": 6},
             s3_location="s3://bucket/session/",
             reader_name="chronic",
             chronic_start_flag=True,

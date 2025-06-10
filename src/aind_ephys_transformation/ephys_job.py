@@ -738,6 +738,14 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
                     write_or_append_recording_to_zarr,
                 )
 
+                n_jobs = job_kwargs.get("n_jobs", 1)
+                if self.job_settings.s3_location is not None and n_jobs > 1:
+                    logging.warning(
+                        "Using multiple jobs for writing data to zarr "
+                        "is not supported. Using single job instead."
+                    )
+                    job_kwargs["n_jobs"] = 1
+
                 # For Chronic data, we use a custom function to write the
                 # recording to zarr, which handles the appending of data
                 write_or_append_recording_to_zarr(
