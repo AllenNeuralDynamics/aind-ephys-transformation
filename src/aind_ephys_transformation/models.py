@@ -9,6 +9,7 @@ class ReaderName(str, Enum):
     """Enum for readers"""
 
     OPENEPHYS = "openephysbinary"
+    CHRONIC = "chronic"
 
 
 class CompressorName(str, Enum):
