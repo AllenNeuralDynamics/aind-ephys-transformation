@@ -42,6 +42,7 @@ def write_or_append_recording_to_zarr(
         annotations_to_update=annotations_to_update,
         **kwargs,
     )
+    zarr.consolidate_metadata(zarr_root.store)
 
 
 def add_or_append_recording_to_zarr_group(  # noqa: C901
