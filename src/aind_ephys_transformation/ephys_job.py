@@ -41,13 +41,6 @@ def extract_datetime(filename):
     return datetime.strptime(date_str, "%Y-%m-%dT%H-%M-%S")
 
 
-def extract_datetime(filename):
-    """Extract datetime from filename."""
-    # Extract datetime from filename in format YYYY-MM-DDThh-mm-ss
-    date_str = filename.stem.split("_")[-1]
-    return datetime.strptime(date_str, "%Y-%m-%dT%H-%M-%S")
-
-
 class EphysJobSettings(BasicJobSettings):
     """EphysCompressionJob settings."""
 
@@ -180,7 +173,6 @@ class EphysJobSettings(BasicJobSettings):
                 self.chronic_chunks_to_compress = dates
         return self
 
-<<<<<<< HEAD
     @field_validator("s3_location")
     @classmethod
     def validate_s3_location(cls, v: Optional[str]) -> Optional[str]:
@@ -195,8 +187,6 @@ class EphysJobSettings(BasicJobSettings):
                 v = v[:-1]
         return v
 
-=======
->>>>>>> 5fb362a2bc226c94f74fdff5768fed49f76f3fe5
 
 class EphysCompressionJob(GenericEtl[EphysJobSettings]):
     """Main class to handle ephys data compression"""
