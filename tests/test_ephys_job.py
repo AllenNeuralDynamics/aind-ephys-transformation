@@ -1117,6 +1117,145 @@ class TestEphysJob(unittest.TestCase):
         self.assertEqual(expected_job_response, job_response)
         mock_compress_raw_data.assert_called_once()
 
+    @patch("pathlib.Path.unlink")
+    @patch("numpy.memmap")
+    @patch("aind_ephys_transformation.ephys_job.sync_dir_to_s3")
+    @patch("aind_ephys_transformation.ephys_job.copy_file_to_s3")
+    def test_s3_location_copy_and_clip(
+        self,
+        mock_copy_file_to_s3: MagicMock,
+        mock_sync_dir_to_s3: MagicMock,
+        mock_memmap: MagicMock,
+        _: MagicMock,
+    ):
+        """Tests S3 location generation for OpenEphys data"""
+        job_settings_s3 = EphysJobSettings(
+            input_source=OE_DATA_DIR,
+            output_directory=Path("output_dir_s3"),
+            compress_job_save_kwargs={"n_jobs": 1},
+            s3_location="s3://bucket/session/",
+        )
+        # s3_location will be "s3://bucket/session" after validation
+        expected_s3_base = "s3://bucket/session"
+
+        job_s3 = EphysCompressionJob(job_settings=job_settings_s3)
+
+        def base_path(num: int) -> Path:
+            """Utility method to construct expected output base paths"""
+            return (
+                Path("Record Node 101")
+                / f"experiment{num}"
+                / "recording1"
+                / "continuous"
+            )
+
+        expected_output = [
+            {
+                "relative_path_name": str(
+                    base_path(1) / "Neuropix-PXI-100.ProbeB" / "continuous.dat"
+                ),
+                "n_chan": 384,
+                "data": (100, 384),
+            },
+            {
+                "relative_path_name": str(
+                    base_path(1) / "Neuropix-PXI-100.ProbeC" / "continuous.dat"
+                ),
+                "n_chan": 384,
+                "data": (100, 384),
+            },
+            {
+                "relative_path_name": str(
+                    base_path(1) / "NI-DAQmx-103.PXIe-6341" / "continuous.dat"
+                ),
+                "n_chan": 8,
+                "data": (100, 8),
+            },
+            {
+                "relative_path_name": str(
+                    base_path(6) / "Neuropix-PXI-100.ProbeB" / "continuous.dat"
+                ),
+                "n_chan": 384,
+                "data": (100, 384),
+            },
+            {
+                "relative_path_name": str(
+                    base_path(6) / "Neuropix-PXI-100.ProbeC" / "continuous.dat"
+                ),
+                "n_chan": 384,
+                "data": (100, 384),
+            },
+            {
+                "relative_path_name": str(
+                    base_path(6) / "NI-DAQmx-103.PXIe-6341" / "continuous.dat"
+                ),
+                "n_chan": 8,
+                "data": (100, 8),
+            },
+            {
+                "relative_path_name": str(
+                    base_path(3) / "NI-DAQmx-103.PXIe-6341" / "continuous.dat"
+                ),
+                "n_chan": 8,
+                "data": (100, 8),
+            },
+            {
+                "relative_path_name": str(
+                    base_path(3) / "Neuropix-PXI-100.ProbeB" / "continuous.dat"
+                ),
+                "n_chan": 384,
+                "data": (100, 384),
+            },
+            {
+                "relative_path_name": str(
+                    base_path(3) / "Neuropix-PXI-100.ProbeC" / "continuous.dat"
+                ),
+                "n_chan": 384,
+                "data": (100, 384),
+            },
+        ]
+        expected_memmap_calls = []
+        expected_copy_calls = []
+        for foobar in expected_output:
+            expected_memmap_calls.append(
+                call(
+                    filename=Path(foobar["relative_path_name"]),
+                    dtype="int16",
+                    shape=foobar["data"],
+                    order="C",
+                    mode="w+",
+                )
+            )
+            expected_memmap_calls.append(
+                call().__setitem__(slice(None, None, None), foobar["data"])
+            )
+            expected_copy_calls.append(
+                call(
+                    Path(foobar["relative_path_name"]),
+                    f"{expected_s3_base}/{foobar['relative_path_name']}",
+                )
+            )
+        dst_dir = Path(".")
+        job_s3._copy_and_clip_data(dst_dir=dst_dir, stream_gen=expected_output)
+
+        # Verify sync_dir_to_s3 was called correctly for non-.dat files
+        mock_sync_dir_to_s3.assert_called_once_with(
+            OE_DATA_DIR, expected_s3_base, exclude=["*.dat"]
+        )
+
+        # Verify copy_file_to_s3 was called for each .dat file
+        expected_copy_calls = []
+        for foobar in expected_output:
+            expected_copy_calls.append(
+                call(
+                    dst_dir / foobar["relative_path_name"],
+                    f"{expected_s3_base}/{foobar['relative_path_name']}",
+                )
+            )
+        mock_copy_file_to_s3.assert_has_calls(
+            expected_copy_calls, any_order=True
+        )
+
 
 class TestCheckTimeAlignment(unittest.TestCase):
     """Tests time alignment check"""
@@ -1564,13 +1703,110 @@ class TestChronicCompressJob(unittest.TestCase):
                 shaping_weight=0.0,
             ),
             "max_windows_filename_len": 150,
-            "output_dir":
-                self.chronic_job.job_settings.output_directory /
-                "ecephys_compressed",
+            "output_dir": self.chronic_job.job_settings.output_directory
+            / "ecephys_compressed",
             "output_format": "zarr",
             "job_kwargs": {"n_jobs": 1},
         }
         self.assertEqual(expected_comp_args_derived, actual_comp_args_derived)
+
+    @patch(
+        "aind_ephys_transformation.compression_utils."
+        "write_or_append_recording_to_zarr"
+    )
+    @patch("aind_ephys_transformation.ephys_job.sync_dir_to_s3")
+    @patch("aind_ephys_transformation.ephys_job.copy_file_to_s3")
+    def test_s3_location(
+        self,
+        mock_copy_file_to_s3: MagicMock,
+        mock_sync_dir_to_s3: MagicMock,
+        mock_write_or_append_recording_to_zarr: MagicMock,
+    ):
+        """Tests S3 location generation for chronic recordings"""
+        job_settings_s3 = EphysJobSettings(
+            input_source=CHRONIC_DATA_DIR,
+            output_directory=Path("output_dir_s3"),
+            compress_job_save_kwargs={"n_jobs": 6},
+            s3_location="s3://bucket/session/",
+            reader_name="chronic",
+            chronic_start_flag=True,
+        )
+        # s3_location will be "s3://bucket/session" after validation
+        expected_s3_base = "s3://bucket/session"
+
+        chronic_job_s3 = EphysCompressionJob(job_settings=job_settings_s3)
+
+        chronic_job_s3._compress_raw_data()
+
+        mock_sync_dir_to_s3.assert_not_called()
+
+        # Assert calls to copy_file_to_s3
+        onix_ephys_dir = CHRONIC_DATA_DIR / "OnixEphys"
+        expected_copy_calls = [
+            call(
+                onix_ephys_dir / "OnixEphys_Clock_2025-05-13T19-00-00.bin",
+                f"{expected_s3_base}/OnixEphys/"
+                "OnixEphys_Clock_2025-05-13T19-00-00.bin",
+            ),
+            call(
+                onix_ephys_dir / "OnixEphys_Clock_2025-05-13T20-00-00.bin",
+                f"{expected_s3_base}/OnixEphys/"
+                "OnixEphys_Clock_2025-05-13T20-00-00.bin",
+            ),
+            call(
+                onix_ephys_dir / "OnixEphys_Clock_2025-05-13T21-00-00.bin",
+                f"{expected_s3_base}/OnixEphys/"
+                "OnixEphys_Clock_2025-05-13T21-00-00.bin",
+            ),
+            call(
+                CHRONIC_DATA_DIR / "probe.json",
+                f"{expected_s3_base}/probe.json",
+            ),
+            call(
+                CHRONIC_DATA_DIR / "binary_info.json",
+                f"{expected_s3_base}/binary_info.json",
+            ),
+        ]
+        mock_copy_file_to_s3.assert_has_calls(
+            expected_copy_calls, any_order=True
+        )
+        self.assertEqual(mock_copy_file_to_s3.call_count, 5)
+
+        # Assert call to write_or_append_recording_to_zarr
+        expected_zarr_s3_path = (
+            f"{expected_s3_base}/ecephys_compressed/"
+            f"experiment1_AmplifierData.zarr"
+        )
+
+        mock_write_or_append_recording_to_zarr.assert_called_once()
+
+        # Get the arguments of the call to the mock
+        # call_args is a tuple (pos_args, named_args)
+        _args, kwargs = mock_write_or_append_recording_to_zarr.call_args
+
+        self.assertEqual(kwargs.get("folder_path"), expected_zarr_s3_path)
+        self.assertIn("recording", kwargs)
+        self.assertIsInstance(kwargs.get("compressor"), WavPack)
+        self.assertEqual(kwargs.get("compressor_by_dataset"), {"times": None})
+        self.assertEqual(
+            kwargs.get("annotations_to_update"), ["start_end_frames"]
+        )
+        # n_jobs comes from job_settings.compress_job_save_kwargs
+        self.assertEqual(kwargs.get("n_jobs"), 1)
+
+    def test_wrong_s3(self):
+        """Tests S3 location generation with wrong s3_location"""
+        with self.assertRaises(ValueError) as e:
+            _ = EphysJobSettings(
+                input_source=CHRONIC_DATA_DIR,
+                output_directory=Path("output_dir_s3"),
+                compress_job_save_kwargs={"n_jobs": 1},
+                s3_location="s2://bucket/session",
+            )
+        self.assertIn(
+            "S3 location must start with 's3://'.",
+            str(e.exception),
+        )
 
 
 if __name__ == "__main__":

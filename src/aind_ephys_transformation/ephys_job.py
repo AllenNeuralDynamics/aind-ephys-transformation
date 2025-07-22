@@ -9,7 +9,7 @@ import json
 from datetime import datetime
 from pathlib import Path
 from typing import Iterator, Literal, Optional, List
-from pydantic import model_validator
+from pydantic import model_validator, field_validator
 
 import numpy as np
 from aind_data_transformation.core import (
@@ -31,6 +31,7 @@ from aind_ephys_transformation.models import (
     ReaderName,
     RecordingBlockPrefixes,
 )
+from aind_ephys_transformation.utils import sync_dir_to_s3, copy_file_to_s3
 
 
 def extract_datetime(filename):
@@ -43,6 +44,15 @@ def extract_datetime(filename):
 class EphysJobSettings(BasicJobSettings):
     """EphysCompressionJob settings."""
 
+    s3_location: Optional[str] = Field(
+        default=None,
+        description=(
+            "S3 location to upload the compressed data. "
+            "If provided, the data will be uploaded to S3 and not saved "
+            "to the output directory."
+        ),
+        title="S3 Location",
+    )
     # reader settings
     reader_name: ReaderName = Field(
         default=ReaderName.OPENEPHYS,
@@ -162,6 +172,20 @@ class EphysJobSettings(BasicJobSettings):
                 ]
                 self.chronic_chunks_to_compress = dates
         return self
+
+    @field_validator("s3_location")
+    @classmethod
+    def validate_s3_location(cls, v: Optional[str]) -> Optional[str]:
+        """Validates s3_location."""
+        if v is not None:
+            if not v.startswith("s3://"):
+                raise ValueError(
+                    "S3 location must start with 's3://'."
+                )
+            # remuve trailing slash if present
+            if v.endswith("/"):
+                v = v[:-1]
+        return v
 
 
 class EphysCompressionJob(GenericEtl[EphysJobSettings]):
@@ -527,7 +551,7 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
                 }
             )
 
-    def _copy_and_clip_data(
+    def _copy_and_clip_data(  # noqa: C901
         self,
         dst_dir: Path,
         stream_gen: Iterator[dict],
@@ -568,13 +592,18 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
                     ]
                 )
             for f in files_to_copy:
-                dst_file_path = dst_dir / f.relative_to(
+                dst_file_path = f.relative_to(
                     self.job_settings.input_source
                 )
-                dst_file_path.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copy(
-                    f, dst_dir / f.relative_to(self.job_settings.input_source)
-                )
+                if self.job_settings.s3_location is not None:
+                    copy_file_to_s3(
+                        f,
+                        f"{self.job_settings.s3_location}/{dst_file_path}"
+                    )
+                else:
+                    dst_path = dst_dir / dst_file_path
+                    dst_path.parent.mkdir(parents=True, exist_ok=True)
+                    shutil.copy(f, dst_path)
 
             if self.job_settings.chronic_start_flag:
                 # Copy the probe.json and binary_info.json files
@@ -582,29 +611,59 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
                 binary_info_json = (
                     self.job_settings.input_source / "binary_info.json"
                 )
-                shutil.copy(probe_json, dst_dir / probe_json.name)
-                shutil.copy(binary_info_json, dst_dir / binary_info_json.name)
+                if self.job_settings.s3_location is not None:
+                    copy_file_to_s3(
+                        probe_json,
+                        f"{self.job_settings.s3_location}/{probe_json.name}"
+                    )
+                    copy_file_to_s3(
+                        binary_info_json,
+                        f"{self.job_settings.s3_location}/"
+                        f"{binary_info_json.name}"
+                    )
+                else:
+                    shutil.copy(probe_json, dst_dir / probe_json.name)
+                    shutil.copy(
+                        binary_info_json,
+                        dst_dir / binary_info_json.name
+                    )
         elif self.job_settings.reader_name == ReaderName.OPENEPHYS:
             patterns_to_ignore = ["*.dat"]
-            shutil.copytree(
-                self.job_settings.input_source,
-                dst_dir,
-                ignore=shutil.ignore_patterns(*patterns_to_ignore),
-            )
-        # second: copy clipped dat files
-        for stream in stream_gen:
-            data = stream["data"]
-            rel_path_name = stream["relative_path_name"]
-            n_chan = stream["n_chan"]
-            dst_raw_file = dst_dir / rel_path_name
-            dst_data = np.memmap(
-                filename=dst_raw_file,
-                dtype="int16",
-                shape=(self.job_settings.clip_n_frames, n_chan),
-                order="C",
-                mode="w+",
-            )
-            dst_data[:] = data[: self.job_settings.clip_n_frames]
+            if self.job_settings.s3_location is not None:
+                # If we are uploading to S3, we don't copy the files
+                # to the local directory, but just upload them directly
+                sync_dir_to_s3(
+                    self.job_settings.input_source,
+                    self.job_settings.s3_location,
+                    exclude=patterns_to_ignore
+                )
+            else:
+                shutil.copytree(
+                    self.job_settings.input_source,
+                    dst_dir,
+                    ignore=shutil.ignore_patterns(*patterns_to_ignore),
+                )
+            # second: copy clipped dat files
+            for stream in stream_gen:
+                data = stream["data"]
+                rel_path_name = stream["relative_path_name"]
+                n_chan = stream["n_chan"]
+                dst_raw_file = dst_dir / rel_path_name
+                dst_data = np.memmap(
+                    filename=dst_raw_file,
+                    dtype="int16",
+                    shape=(self.job_settings.clip_n_frames, n_chan),
+                    order="C",
+                    mode="w+",
+                )
+                dst_data[:] = data[: self.job_settings.clip_n_frames]
+                if self.job_settings.s3_location is not None:
+                    copy_file_to_s3(
+                        dst_raw_file,
+                        f"{self.job_settings.s3_location}/{rel_path_name}"
+                    )
+                    # remove local file after copying to S3
+                    dst_raw_file.unlink()
 
     def _compress_and_write_block(
         self,
@@ -651,17 +710,26 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
                 rec = read_block["scaled_recording"]
             experiment_name = read_block["experiment_name"]
             stream_name = read_block["stream_name"]
-            zarr_path = output_dir / f"{experiment_name}_{stream_name}.zarr"
-            if (
-                platform.system() == "Windows"
-                and len(str(zarr_path)) > max_windows_filename_len
-            ):
-                raise Exception(
-                    f"File name for zarr path is too long "
-                    f"({len(str(zarr_path))})"
-                    f" and might lead to errors. Use a shorter destination "
-                    f"path."
+            if self.job_settings.s3_location is not None:
+                # If we are uploading to S3, we don't write the data to a
+                # local directory, but just upload it directly
+                zarr_path = (
+                    f"{self.job_settings.s3_location}/{output_dir.name}/"
+                    f"{experiment_name}_{stream_name}.zarr"
                 )
+            else:
+                zarr_path = \
+                    output_dir / f"{experiment_name}_{stream_name}.zarr"
+                if (
+                    platform.system() == "Windows"
+                    and len(str(zarr_path)) > max_windows_filename_len
+                ):
+                    raise Exception(
+                        f"File name for zarr path is too long "
+                        f"({len(str(zarr_path))})"
+                        f" and might lead to errors. Use a shorter "
+                        f"destination path."
+                    )
             # compression for times is disabled
             compressor_by_dataset = dict(times=None)
 
@@ -669,6 +737,14 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
                 from aind_ephys_transformation.compression_utils import (
                     write_or_append_recording_to_zarr,
                 )
+
+                n_jobs = job_kwargs.get("n_jobs", 1)
+                if self.job_settings.s3_location is not None and n_jobs > 1:
+                    logging.warning(
+                        "Using multiple jobs for writing data to zarr "
+                        "is not supported. Using single job instead."
+                    )
+                    job_kwargs["n_jobs"] = 1
 
                 # For Chronic data, we use a custom function to write the
                 # recording to zarr, which handles the appending of data
