@@ -12,4 +12,4 @@ RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2
 # Add git in case we need to install from branches
 RUN apt-get update && apt-get install -y git && \
     pip install --upgrade pip && \
-    pip install .[ephys] --no-cache-dir
+    pip install . --no-cache-dir
