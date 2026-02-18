@@ -6,10 +6,12 @@ import platform
 import shutil
 import sys
 import json
+from packaging.version import parse
 from datetime import datetime
 from pathlib import Path
 from typing import Iterator, Literal, Optional, List
 from pydantic import model_validator, field_validator
+import xml.etree.ElementTree as ET
 
 import numpy as np
 from aind_data_transformation.core import (
@@ -67,8 +69,11 @@ class EphysJobSettings(BasicJobSettings):
     # Check timestamps alignment
     check_timestamps: bool = Field(
         default=True,
-        description="Check if timestamps are aligned and raise an error if "
-        "they are not.",
+        description=(
+            "Check if timestamps are aligned and raise an error if they are "
+            "not. This check is applied only for Open Ephys < 1.1 data, "
+            "as >=1.1 versions of Open Ephys have already aligned timestamps."
+        ),
         title="Check Timestamps",
     )
     chronic_chunks_to_compress: Optional[List[str]] = Field(
@@ -450,8 +455,24 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
             # Chronic data does not have timestamps, so we return True
             return True
         else:
-            # OpenEphys data has timestamps, so we check for them
-            return self._check_openephys_timestamps()
+            # Read Open Ephys version from settings file
+            openephys_folder = self.job_settings.input_source
+            # We use the first settings file we find, becuase the version
+            # is the same
+            settings_file = list(openephys_folder.glob("**/settings*.xml"))[0]
+
+            # Read xml file and check for OpenEphys version
+            tree = ET.parse(str(settings_file))
+            root = tree.getroot()
+
+            info_chain = root.find("INFO")
+            oe_version = parse(info_chain.find("VERSION").text)
+            if oe_version >= parse("1.1.0-preview"):
+                # OE version >= 1.1.0-preview -> timestamps already aligned
+                return True
+            else:
+                # OE version < 1.1.0-preview -> timestamps may not be aligned
+                return self._check_openephys_timestamps()
 
     def _check_openephys_timestamps(self) -> bool:
         """
