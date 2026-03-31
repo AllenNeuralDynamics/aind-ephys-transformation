@@ -67,7 +67,11 @@ def add_or_append_recording_to_zarr_group(  # noqa: C901
         )
     if "num_channels" not in zarr_group.attrs:
         zarr_group.attrs["num_segments"] = 1
-    dataset_paths = [f"traces_seg{0}"]
+    dataset_paths = ["traces_seg0"]
+    if recording.has_time_vector():
+        dataset_timestamps_paths = ["times_seg0"]
+    else:
+        dataset_timestamps_paths = None
 
     dtype = recording.get_dtype() if dtype is None else dtype
     channel_chunk_size = zarr_kwargs.get("channel_chunk_size", None)
@@ -87,12 +91,17 @@ def add_or_append_recording_to_zarr_group(  # noqa: C901
 
     compressor_traces = compressor_by_dataset.get("traces", global_compressor)
     filters_traces = filters_by_dataset.get("traces", global_filters)
+    compressor_times = compressor_by_dataset.get("times", global_compressor)
+    filters_times = filters_by_dataset.get("times", global_filters)
     add_or_append_traces_to_zarr(
         recording=recording,
         zarr_group=zarr_group,
         dataset_paths=dataset_paths,
-        compressor=compressor_traces,
-        filters=filters_traces,
+        dataset_timestamps_paths=dataset_timestamps_paths,
+        compressor_traces=compressor_traces,
+        filters_traces=filters_traces,
+        compressor_times=compressor_times,
+        filters_times=filters_times,
         dtype=dtype,
         channel_chunk_size=channel_chunk_size,
         global_start_frame=global_start_frame,
@@ -112,31 +121,7 @@ def add_or_append_recording_to_zarr_group(  # noqa: C901
     t_starts = np.zeros(recording.get_num_segments(), dtype="float64") * np.nan
     for segment_index, rs in enumerate(recording._recording_segments):
         d = rs.get_times_kwargs()
-        time_vector = d["time_vector"]
-
-        compressor_times = compressor_by_dataset.get(
-            "times", global_compressor
-        )
-        filters_times = filters_by_dataset.get("times", global_filters)
-
-        if time_vector is not None:
-            time_dset_name = f"times_seg{segment_index}"
-            if time_dset_name not in zarr_group:
-                _ = zarr_group.create_dataset(
-                    name=f"times_seg{segment_index}",
-                    data=time_vector,
-                    filters=filters_times,
-                    compressor=compressor_times,
-                )
-            else:
-                time_dset = zarr_group[time_dset_name]
-                if len(time_dset) < global_start_frame + len(time_vector):
-                    # Resize the dataset if it is smaller than expected
-                    time_dset.resize((global_start_frame + len(time_vector),))
-                global_end_frame = global_start_frame + len(time_vector)
-                time_dset[global_start_frame:global_end_frame] = time_vector
-
-        elif d["t_start"] is not None:
+        if d["t_start"] is not None:
             t_starts[segment_index] = d["t_start"]
 
     if np.any(~np.isnan(t_starts)) and "t_starts" not in zarr_group:
@@ -161,10 +146,13 @@ def add_or_append_traces_to_zarr(
     recording,
     zarr_group,
     dataset_paths,
+    dataset_timestamps_paths=None,
     channel_chunk_size=None,
     dtype=None,
-    compressor=None,
-    filters=None,
+    compressor_traces=None,
+    filters_traces=None,
+    compressor_times=None,
+    filters_times=None,
     global_start_frame=0,
     verbose=False,
     **job_kwargs,
@@ -184,10 +172,14 @@ def add_or_append_traces_to_zarr(
         Channels per chunk
     dtype : dtype, default: None
         Type of the saved data
-    compressor : zarr compressor or None, default: None
-        Zarr compressor
-    filters : list, default: None
-        List of zarr filters
+    compressor_traces : zarr compressor or None, default: None
+        Zarr compressor for traces
+    filters_traces : list, default: None
+        List of zarr filters for traces
+    compressor_times : zarr compressor or None, default: None
+        Zarr compressor for times
+    filters_times : list, default: None
+        List of zarr filters for times
     global_start_frame : int, default: 0
         The global start frame to use for appending traces.
     verbose : bool, default: False
@@ -207,10 +199,11 @@ def add_or_append_traces_to_zarr(
     job_kwargs = fix_job_kwargs(job_kwargs)
     chunk_size = ensure_chunk_size(recording, **job_kwargs)
 
-    # create zarr datasets files
-    zarr_datasets = []
     # only 1 segment supported
     segment_index = 0
+
+    # create zarr datasets files
+    zarr_datasets = []
     num_frames = recording.get_num_samples(segment_index)
     num_channels = recording.get_num_channels()
     dset_name = dataset_paths[segment_index]
@@ -225,15 +218,39 @@ def add_or_append_traces_to_zarr(
             shape=shape,
             chunks=(chunk_size, channel_chunk_size),
             dtype=dtype,
-            filters=filters,
-            compressor=compressor,
+            filters=filters_traces,
+            compressor=compressor_traces,
         )
     zarr_datasets.append(dset)
+
+    zarr_timestamps_datasets = []
+    if dataset_timestamps_paths is not None:
+        timestamps_dset_name = dataset_timestamps_paths[segment_index]
+        if timestamps_dset_name in zarr_group:
+            timestamps_dset = zarr_group[timestamps_dset_name]
+            if len(timestamps_dset) < global_start_frame + num_frames:
+                timestamps_dset.resize((global_start_frame + num_frames,))
+        else:
+            timestamps_dset = zarr_group.create_dataset(
+                name=timestamps_dset_name,
+                shape=(num_frames,),
+                chunks=(chunk_size,),
+                dtype="float64",
+                filters=filters_times,
+                compressor=compressor_times,
+            )
+        zarr_timestamps_datasets.append(timestamps_dset)
 
     # use executor (loop or workers)
     func = _write_zarr_chunk_append
     init_func = _init_zarr_worker_append
-    init_args = (recording, zarr_datasets, dtype, global_start_frame)
+    init_args = (
+        recording,
+        zarr_datasets,
+        zarr_timestamps_datasets,
+        dtype,
+        global_start_frame,
+    )
     executor = ChunkRecordingExecutor(
         recording,
         func,
@@ -297,7 +314,11 @@ def get_recording_slices_aligned_to_zarr_chunks(
 
 # used by write_zarr_recording + ChunkRecordingExecutor
 def _init_zarr_worker_append(
-    recording, zarr_datasets, dtype, global_start_frame
+    recording,
+    zarr_datasets,
+    zarr_timestamps_datasets,
+    dtype,
+    global_start_frame,
 ):
     """Initialize the worker context for appending to Zarr."""
 
@@ -305,6 +326,7 @@ def _init_zarr_worker_append(
     worker_ctx = {}
     worker_ctx["recording"] = recording
     worker_ctx["zarr_datasets"] = zarr_datasets
+    worker_ctx["zarr_timestamps_datasets"] = zarr_timestamps_datasets
     worker_ctx["dtype"] = np.dtype(dtype)
     worker_ctx["global_start_frame"] = global_start_frame
 
@@ -322,7 +344,11 @@ def _write_zarr_chunk_append(
     recording = worker_ctx["recording"]
     dtype = worker_ctx["dtype"]
     zarr_dataset = worker_ctx["zarr_datasets"][segment_index]
+    zarr_timestamps_datasets = worker_ctx["zarr_timestamps_datasets"]
+
     global_start_frame = worker_ctx["global_start_frame"]
+    start_frame_global = start_frame + global_start_frame
+    end_frame_global = end_frame + global_start_frame
 
     # apply function
     traces = recording.get_traces(
@@ -331,9 +357,15 @@ def _write_zarr_chunk_append(
         segment_index=segment_index,
     )
     traces = traces.astype(dtype)
-    start_frame += global_start_frame
-    end_frame += global_start_frame
-    zarr_dataset[start_frame:end_frame, :] = traces
+    zarr_dataset[start_frame_global:end_frame_global, :] = traces
+
+    if len(zarr_timestamps_datasets) > 0:
+        zarr_timestamps_dataset = zarr_timestamps_datasets[segment_index]
+        timestamps = recording.get_times()[start_frame:end_frame]
+        zarr_timestamps_dataset[start_frame_global:end_frame_global] = (
+            timestamps
+        )
+        del timestamps
 
     # fix memory leak by forcing garbage collection
     del traces
