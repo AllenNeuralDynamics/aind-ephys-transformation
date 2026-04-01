@@ -281,32 +281,61 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
             adc_depth = binary_info.pop("adc_depth")
 
             recording_list = []
-            if self.job_settings.chronic_start_flag:
-                sample_index_from_session_start = 0
+
+            # Look for sample metadata files to determine the sample index
+            # from session start. If not available or invalid, fall back to
+            # parsing clock files to get cumulative start frame.
+            sample_starts = []
+            for amplifier_dataset in amplifier_datasets_to_compress:
+                p = amplifier_dataset
+                sample_metadata_file = Path(str(p).replace(
+                    "AmplifierData",
+                    "SampleMetadata"
+                ).replace(".bin", ".json"))
+                if sample_metadata_file.exists():
+                    with open(sample_metadata_file) as f:
+                        sample_metadata = json.load(f)
+                    sample_start = sample_metadata.get("sample_start")
+                    # The sample_start should be a non-negative integer.
+                    # This check is in place to spot overflow errors in
+                    # existing datasets.
+                    if sample_start is not None and sample_start >= 0:
+                        sample_starts.append(sample_start)
+
+            if len(sample_starts) == len(amplifier_datasets_to_compress):
+                # If we have valid sample_start for all datasets, we can use it
+                sample_index_from_session_start = sample_starts[0]
+                logging.info(
+                    "Using sample_start from SampleMetadata files to "
+                    "determine sample index from session start."
+                )
             else:
-                # If not chronic start flag, we need to parse all previous
-                # clock bin files to get the cumulative start frame
-                first_chunk_to_compress = (
-                    self.job_settings.chronic_chunks_to_compress[0]
-                )
-                first_date_to_compress = datetime.strptime(
-                    first_chunk_to_compress, "%Y-%m-%dT%H-%M-%S"
-                )
-                all_previous_clock_files = [
-                    p
-                    for p in dataset_folder.glob("**/OnixEphys_Clock_*")
-                    if extract_datetime(p) < first_date_to_compress
-                ]
-                sorted_clock_files = sorted(
-                    all_previous_clock_files,
-                    key=lambda x: extract_datetime(x),
-                )
-                sample_index_from_session_start = 0
-                for clock_file in sorted_clock_files:
-                    clock_data = np.memmap(
-                        filename=clock_file, dtype="uint64", mode="r"
+                if self.job_settings.chronic_start_flag:
+                    sample_index_from_session_start = 0
+                else:
+                    # If not chronic start flag, we need to parse all previous
+                    # clock bin files to get the cumulative start frame
+                    first_chunk_to_compress = (
+                        self.job_settings.chronic_chunks_to_compress[0]
                     )
-                    sample_index_from_session_start += len(clock_data)
+                    first_date_to_compress = datetime.strptime(
+                        first_chunk_to_compress, "%Y-%m-%dT%H-%M-%S"
+                    )
+                    all_previous_clock_files = [
+                        p
+                        for p in dataset_folder.glob("**/OnixEphys_Clock_*")
+                        if extract_datetime(p) < first_date_to_compress
+                    ]
+                    sorted_clock_files = sorted(
+                        all_previous_clock_files,
+                        key=lambda x: extract_datetime(x),
+                    )
+                    sample_index_from_session_start = 0
+                    for clock_file in sorted_clock_files:
+                        clock_data = np.memmap(
+                            filename=clock_file, dtype="uint64", mode="r"
+                        )
+                        sample_index_from_session_start += len(clock_data)
             logging.info(
                 f"Sample index from session start: "
                 f"{sample_index_from_session_start}"
