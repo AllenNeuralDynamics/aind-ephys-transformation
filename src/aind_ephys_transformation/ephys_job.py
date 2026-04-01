@@ -81,6 +81,14 @@ class EphysJobSettings(BasicJobSettings):
         ),
         title="Chunks to Compress",
     )
+    chronic_use_sample_metadata: bool = Field(
+        default=True,
+        description=(
+            "If True, it uses the sample metadata to determine the start of "
+            "sample for each chunk."
+        ),
+        title="Chronic Use Sample Metadata Flag",
+    )
     chronic_start_flag: bool = Field(
         default=False,
         description=(
@@ -281,32 +289,63 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
             adc_depth = binary_info.pop("adc_depth")
 
             recording_list = []
-            if self.job_settings.chronic_start_flag:
-                sample_index_from_session_start = 0
+
+            # Look for sample metadata files to determine the sample index
+            # from session start. If not available or invalid, fall back to
+            # parsing clock files to get cumulative start frame.
+            start_samples = []
+            for amplifier_dataset in amplifier_datasets_to_compress:
+                p = amplifier_dataset
+                sample_metadata_file = Path(str(p).replace(
+                    "AmplifierData",
+                    "SampleMetadata"
+                ).replace(".bin", ".json"))
+                if sample_metadata_file.exists():
+                    with open(sample_metadata_file) as f:
+                        sample_metadata = json.load(f)
+                    start_sample = sample_metadata.get("start_sample")
+                    # The sample_start should be a non-negative integer.
+                    # This check is in place to spot overflow errors in
+                    # existing datasets.
+                    if start_sample is not None and start_sample >= 0:
+                        start_samples.append(start_sample)
+
+            if self.job_settings.chronic_use_sample_metadata and (
+                len(start_samples) == len(amplifier_datasets_to_compress)
+            ):
+                # If we have valid start_sample for all datasets, we can use it
+                sample_index_from_session_start = start_samples[0]
+                logging.info(
+                    "Using start_sample from SampleMetadata files to "
+                    "determine sample index from session start."
+                )
             else:
-                # If not chronic start flag, we need to parse all previous
-                # clock bin files to get the cumulative start frame
-                first_chunk_to_compress = (
-                    self.job_settings.chronic_chunks_to_compress[0]
-                )
-                first_date_to_compress = datetime.strptime(
-                    first_chunk_to_compress, "%Y-%m-%dT%H-%M-%S"
-                )
-                all_previous_clock_files = [
-                    p
-                    for p in dataset_folder.glob("**/OnixEphys_Clock_*")
-                    if extract_datetime(p) < first_date_to_compress
-                ]
-                sorted_clock_files = sorted(
-                    all_previous_clock_files,
-                    key=lambda x: extract_datetime(x),
-                )
-                sample_index_from_session_start = 0
-                for clock_file in sorted_clock_files:
-                    clock_data = np.memmap(
-                        filename=clock_file, dtype="uint64", mode="r"
+                if self.job_settings.chronic_start_flag:
+                    sample_index_from_session_start = 0
+                else:
+                    # If not chronic start flag, we need to parse all previous
+                    # clock bin files to get the cumulative start frame
+                    first_chunk_to_compress = (
+                        self.job_settings.chronic_chunks_to_compress[0]
                     )
-                    sample_index_from_session_start += len(clock_data)
+                    first_date_to_compress = datetime.strptime(
+                        first_chunk_to_compress, "%Y-%m-%dT%H-%M-%S"
+                    )
+                    all_previous_clock_files = [
+                        p
+                        for p in dataset_folder.glob("**/OnixEphys_Clock_*")
+                        if extract_datetime(p) < first_date_to_compress
+                    ]
+                    sorted_clock_files = sorted(
+                        all_previous_clock_files,
+                        key=lambda x: extract_datetime(x),
+                    )
+                    sample_index_from_session_start = 0
+                    for clock_file in sorted_clock_files:
+                        clock_data = np.memmap(
+                            filename=clock_file, dtype="uint64", mode="r"
+                        )
+                        sample_index_from_session_start += len(clock_data)
             logging.info(
                 f"Sample index from session start: "
                 f"{sample_index_from_session_start}"
