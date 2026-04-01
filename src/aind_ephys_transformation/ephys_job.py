@@ -81,6 +81,14 @@ class EphysJobSettings(BasicJobSettings):
         ),
         title="Chunks to Compress",
     )
+    chronic_use_sample_metadata: bool = Field(
+        default=True,
+        description=(
+            "If True, it uses the sample metadata to determine the start of "
+            "sample for each chunk."
+        ),
+        title="Chronic Use Sample Metadata Flag",
+    )
     chronic_start_flag: bool = Field(
         default=False,
         description=(
@@ -285,7 +293,7 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
             # Look for sample metadata files to determine the sample index
             # from session start. If not available or invalid, fall back to
             # parsing clock files to get cumulative start frame.
-            sample_starts = []
+            start_samples = []
             for amplifier_dataset in amplifier_datasets_to_compress:
                 p = amplifier_dataset
                 sample_metadata_file = Path(str(p).replace(
@@ -295,18 +303,20 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
                 if sample_metadata_file.exists():
                     with open(sample_metadata_file) as f:
                         sample_metadata = json.load(f)
-                    sample_start = sample_metadata.get("sample_start")
+                    start_sample = sample_metadata.get("start_sample")
                     # The sample_start should be a non-negative integer.
                     # This check is in place to spot overflow errors in
                     # existing datasets.
-                    if sample_start is not None and sample_start >= 0:
-                        sample_starts.append(sample_start)
+                    if start_sample is not None and start_sample >= 0:
+                        start_samples.append(start_sample)
 
-            if len(sample_starts) == len(amplifier_datasets_to_compress):
-                # If we have valid sample_start for all datasets, we can use it
-                sample_index_from_session_start = sample_starts[0]
+            if self.job_settings.chronic_use_sample_metadata and (
+                len(start_samples) == len(amplifier_datasets_to_compress)
+            ):
+                # If we have valid start_sample for all datasets, we can use it
+                sample_index_from_session_start = start_samples[0]
                 logging.info(
-                    "Using sample_start from SampleMetadata files to "
+                    "Using start_sample from SampleMetadata files to "
                     "determine sample index from session start."
                 )
             else:
