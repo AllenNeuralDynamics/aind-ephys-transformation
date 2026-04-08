@@ -293,10 +293,14 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
             # Look for sample metadata files to determine the sample index
             # from session start. If not available or invalid, fall back to
             # parsing clock files to get cumulative start frame.
-            are_sample_metadata_files_valid = self._are_sample_metadata_files_valid(onix_folder)
+            are_sample_metadata_files_valid = (
+                self._are_sample_metadata_files_valid(onix_folder)
+            )
 
             sample_index_from_session_start = None
-            if are_sample_metadata_files_valid and self.job_settings.chronic_use_sample_metadata:
+            if are_sample_metadata_files_valid and (
+                self.job_settings.chronic_use_sample_metadata
+            ):
                 start_samples = []
                 for amplifier_dataset in amplifier_datasets_to_compress:
                     p = amplifier_dataset
@@ -314,14 +318,16 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
                         if start_sample is not None and start_sample >= 0:
                             start_samples.append(start_sample)
                 if len(start_samples) == len(amplifier_datasets_to_compress):
-                    # If we have valid start_sample for all datasets, we can use it
+                    # If we have valid start_sample for all datasets, we can
+                    # use it
                     sample_index_from_session_start = start_samples[0]
                     logging.info(
                         "Using start_sample from SampleMetadata files to "
                         "determine sample index from session start."
                     )
 
-            # Fallback to parsing clock files if sample metadata files are not valid or some are missing
+            # Fallback to parsing clock files if sample metadata files are
+            # not valid or some are missing
             if sample_index_from_session_start is None:
                 if self.job_settings.chronic_start_flag:
                     sample_index_from_session_start = 0
@@ -479,8 +485,8 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
 
     def _are_sample_metadata_files_valid(self, onix_folder: Path) -> bool:
         """
-        Check if sample metadata files are present in the ONIX folder and are valid
-        (all greater than 0, no overlaps).
+        Check if sample metadata files are present in the ONIX folder and are
+        valid (all greater than 0, no overlaps).
         Returns an empty list if no valid sample metadata files are found.
 
         Parameters
@@ -494,7 +500,8 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
                 List of paths to the sample metadata files.
         """
         sample_metadata_files = [
-            p for p in onix_folder.iterdir() if "SampleMetadata" in p.name and p.suffix == ".json"
+            p for p in onix_folder.iterdir() if "SampleMetadata" in p.name
+            and p.suffix == ".json"
         ]
         # Sort by date
         sample_metadata_files = sorted(
@@ -509,7 +516,8 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
             if start_sample is None or start_sample < 0:
                 logging.warning(
                     f"Invalid start_sample in {sample_metadata_file}. "
-                    "Expected a non-negative integer. This file will be ignored."
+                    "Expected a non-negative integer. "
+                    "This file will be ignored."
                 )
                 return False
             if start_sample <= previous_end_sample:
