@@ -1347,6 +1347,7 @@ class TestChronicCompressJob(unittest.TestCase):
             output_directory=Path("output_dir_chronic_append"),
             compress_job_save_kwargs={"n_jobs": 1},
             chronic_chunks_to_compress=["2025-05-13T19-00-00"],
+            chronic_use_sample_metadata=False,
             reader_name="chronic",
             chronic_start_flag=True,
         )
@@ -1363,6 +1364,7 @@ class TestChronicCompressJob(unittest.TestCase):
                 "2025-05-13T20-00-00",
                 "2025-05-13T21-00-00",
             ],
+            chronic_use_sample_metadata=False,
             reader_name="chronic",
         )
         cls.chronic_job_settings_append2 = chronic_job_settings_append2
@@ -1421,6 +1423,21 @@ class TestChronicCompressJob(unittest.TestCase):
             job_settings=chronic_job_settings_multi_match
         )
 
+        chronic_job_settings_sampledata = EphysJobSettings(
+            input_source=CHRONIC_DATA_DIR,
+            output_directory=Path("output_dir_chronic"),
+            compress_job_save_kwargs={"n_jobs": 1},
+            reader_name="chronic",
+            chronic_start_flag=False,
+            chronic_use_sample_metadata=False,
+        )
+        cls.chronic_job_settings_sampledata = (
+            chronic_job_settings_sampledata
+        )
+        cls.chronic_job_settings_sampledata = EphysCompressionJob(
+            job_settings=chronic_job_settings_sampledata
+        )
+
     @classmethod
     def tearDownClass(cls):
         """Remove output directories created during tests"""
@@ -1432,6 +1449,7 @@ class TestChronicCompressJob(unittest.TestCase):
             cls.chronic_job_filter,
             cls.chronic_job_no_match,
             cls.chronic_job_multi_match,
+            cls.chronic_job_settings_sampledata,
         ]:
             output_dir = job.job_settings.output_directory
             if Path(output_dir).exists():
@@ -1493,6 +1511,47 @@ class TestChronicCompressJob(unittest.TestCase):
         )
         read_blocks_repr_str = set([json.dumps(o) for o in read_blocks_repr])
         self.assertEqual(expected_scaled_read_blocks_str, read_blocks_repr_str)
+
+    def test_read_blocks_sampledata(self):
+        """Tests _get_read_blocks method when there is sample data in the
+        metadata"""
+        chunks = [
+            "2025-05-13T19-00-00",
+            "2025-05-13T20-00-00",
+            "2025-05-13T21-00-00"
+        ]
+        for i, chunk in enumerate(chunks):
+            self.chronic_job_settings_sampledata.job_settings.\
+                chronic_chunks_to_compress = [chunk]
+            read_blocks = (
+                self.chronic_job_settings_sampledata._get_read_blocks()
+            )
+            # In this case, start samples should be 100 samples apart
+            # since the ephys and clock data have 100 samples per chunk
+            for read_block in read_blocks:
+                recording = read_block["recording"]
+                start_sample = recording.get_annotation(
+                    "sample_index_from_session_start"
+                )
+                self.assertEqual(start_sample, i * 100)
+
+        # Test with sample metadata
+        self.chronic_job_settings_sampledata.job_settings.\
+            chronic_use_sample_metadata = True
+        for i, chunk in enumerate(chunks):
+            self.chronic_job_settings_sampledata.job_settings.\
+                chronic_chunks_to_compress = [chunk]
+            read_blocks = (
+                self.chronic_job_settings_sampledata._get_read_blocks()
+            )
+            # SampleMetadata has jumps of 300 samples between chunks,
+            # so start samples should be 300 samples apart
+            for read_block in read_blocks:
+                recording = read_block["recording"]
+                start_sample = recording.get_annotation(
+                    "sample_index_from_session_start"
+                )
+                self.assertEqual(start_sample, i * 300)
 
     def test_read_blocks_no_match(self):
         """Tests _get_read_blocks method with no matching chunks"""
@@ -1770,7 +1829,7 @@ class TestChronicCompressJob(unittest.TestCase):
         mock_copy_file_to_s3.assert_has_calls(
             expected_copy_calls, any_order=True
         )
-        self.assertEqual(mock_copy_file_to_s3.call_count, 5)
+        self.assertEqual(mock_copy_file_to_s3.call_count, 8)
 
         # Assert call to write_or_append_recording_to_zarr
         expected_zarr_s3_path = (
