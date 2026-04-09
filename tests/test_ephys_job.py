@@ -24,6 +24,7 @@ from aind_ephys_transformation.models import CompressorName
 TEST_DIR = Path(os.path.dirname(os.path.realpath(__file__))) / "resources"
 OE_DATA_DIR = TEST_DIR / "v0.6.x_neuropixels_multiexp_multistream"
 OE_DATA_DIR_NOT_ALIGNED = TEST_DIR / "v0.6.x_neuropixels_not_aligned"
+OE_DATA_DIR_V110 = TEST_DIR / "v1.1.0_neuropixels_aligned"
 CHRONIC_DATA_DIR = TEST_DIR / "chronic-test-data"
 
 
@@ -1284,6 +1285,16 @@ class TestCheckTimeAlignment(unittest.TestCase):
             job_settings=basic_job_settings_warn
         )
 
+        basic_job_settings_v110 = EphysJobSettings(
+            input_source=OE_DATA_DIR_V110,
+            output_directory=Path("output_dir_align_v110"),
+            compress_job_save_kwargs={"n_jobs": 1},
+        )
+        cls.basic_job_settings_v110 = basic_job_settings_v110
+        cls.basic_job_v110 = EphysCompressionJob(
+            job_settings=basic_job_settings_v110
+        )
+
     def test_check_alignment(self):
         """Tests check_time_alignment returns False"""
         timestamps_ok = self.basic_job_raise._check_timestamps_alignment()
@@ -1300,6 +1311,11 @@ class TestCheckTimeAlignment(unittest.TestCase):
             ),
             e.exception.args,
         )
+
+    def test_check_alignment_v110(self):
+        """Tests check_time_alignment returns True for v1.1.0 data"""
+        timestamps_ok = self.basic_job_v110._check_timestamps_alignment()
+        self.assertTrue(timestamps_ok)
 
     @patch("logging.warning")
     @patch(
