@@ -20,7 +20,8 @@ dependencies = [
     'aind-data-transformation>=0.0.18',
     'spikeinterface[full]>=0.104.0',
     'probeinterface>=0.3.2',
-    'wavpack-numcodecs==0.2.2',
+    'wavpack-numcodecs>=0.2.2; python_version<"3.13"',
+    'wavpack-numcodecs>=0.2.3; python_version>="3.13"',
     's3fs'
 ]
 
