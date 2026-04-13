@@ -513,14 +513,14 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
             with open(sample_metadata_file) as f:
                 sample_metadata = json.load(f)
             start_sample = sample_metadata.get("start_sample")
-            if start_sample is None or start_sample < 0:  # pragma: no cover 
+            if start_sample is None or start_sample < 0:  # pragma: no cover
                 logging.warning(
                     f"Invalid start_sample in {sample_metadata_file}. "
                     "Expected a non-negative integer. "
                     "This file will be ignored."
                 )
                 return False
-            if start_sample <= previous_end_sample:  # pragma: no cover 
+            if start_sample <= previous_end_sample:  # pragma: no cover
                 logging.warning(
                     f"Overlapping start_sample in {sample_metadata_file}. "
                     "This file will be ignored."
