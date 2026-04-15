@@ -6,10 +6,12 @@ import platform
 import shutil
 import sys
 import json
+from packaging.version import parse
 from datetime import datetime
 from pathlib import Path
 from typing import Iterator, Literal, Optional, List
 from pydantic import model_validator, field_validator
+import xml.etree.ElementTree as ET
 
 import numpy as np
 import pandas as pd
@@ -68,8 +70,11 @@ class EphysJobSettings(BasicJobSettings):
     # Check timestamps alignment
     check_timestamps: bool = Field(
         default=True,
-        description="Check if timestamps are aligned and raise an error if "
-        "they are not.",
+        description=(
+            "Check if timestamps are aligned and raise an error if they are "
+            "not. This check is applied only for Open Ephys < 1.1 data, "
+            "as >=1.1 versions of Open Ephys have already aligned timestamps."
+        ),
         title="Check Timestamps",
     )
     chronic_chunks_to_compress: Optional[List[str]] = Field(
@@ -641,11 +646,50 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
           True if timestamps are aligned, False otherwise.
         """
         if self.job_settings.reader_name == ReaderName.CHRONIC:
-            # Chronic data does not have timestamps, so we return True
+            # Chronic data do harp sync on-the-fly, so we return True
             return True
         else:
-            # OpenEphys data has timestamps, so we check for them
-            return self._check_openephys_timestamps()
+            # Read Open Ephys version from settings file
+            openephys_folder = self.job_settings.input_source
+            # We use the first settings file we find, because the version
+            # is the same
+            settings_file = list(openephys_folder.glob("**/settings*.xml"))[0]
+
+            # Read xml file and check for OpenEphys version
+            tree = ET.parse(str(settings_file))
+            root = tree.getroot()
+
+            info_chain = root.find("INFO")
+            oe_version = parse(info_chain.find("VERSION").text)
+            if oe_version >= parse("1.1.0-preview"):
+                # Look for SYNC STATUS in CUSTOM_PARAMETERS section of settings
+                # If not all HARP_SYNCED, check timestamps files to see if
+                # they have been aligned
+                signal_chains = root.findall("SIGNALCHAIN")
+                for sc in signal_chains:
+                    record_node = [
+                        p for p in sc.findall("PROCESSOR")
+                        if p.attrib["name"] == "Record Node"
+                    ]
+                    if len(record_node) > 0:
+                        record_node = record_node[0]
+                        custom_parameters = record_node.find(
+                            "CUSTOM_PARAMETERS"
+                        )
+                        sync_statuses = custom_parameters.findall(
+                            "SYNC_STATUS"
+                        )
+                        all_synced = all(
+                            sync_status.attrib["status"] == "HARP_SYNCED"
+                            for sync_status in sync_statuses
+                        )
+                        if all_synced:
+                            return True
+                        else:
+                            self._check_openephys_timestamps()
+            else:
+                # OE version < 1.1.0-preview -> timestamps may not be aligned
+                return self._check_openephys_timestamps()
 
     def _check_openephys_timestamps(self) -> bool:
         """
