@@ -14,6 +14,7 @@ from pydantic import model_validator, field_validator
 import xml.etree.ElementTree as ET
 
 import numpy as np
+import pandas as pd
 from aind_data_transformation.core import (
     BasicJobSettings,
     GenericEtl,
@@ -85,6 +86,14 @@ class EphysJobSettings(BasicJobSettings):
             "be compressed."
         ),
         title="Chunks to Compress",
+    )
+    chronic_use_sample_metadata: bool = Field(
+        default=True,
+        description=(
+            "If True, it uses the sample metadata to determine the start of "
+            "sample for each chunk."
+        ),
+        title="Chronic Use Sample Metadata Flag",
     )
     chronic_start_flag: bool = Field(
         default=False,
@@ -184,9 +193,7 @@ class EphysJobSettings(BasicJobSettings):
         """Validates s3_location."""
         if v is not None:
             if not v.startswith("s3://"):
-                raise ValueError(
-                    "S3 location must start with 's3://'."
-                )
+                raise ValueError("S3 location must start with 's3://'.")
             # remuve trailing slash if present
             if v.endswith("/"):
                 v = v[:-1]
@@ -215,6 +222,14 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
             ]
             assert len(onix_folders) == 1
             onix_folder = onix_folders[0]
+
+            harp_sync_folders = [
+                p
+                for p in dataset_folder.iterdir()
+                if p.is_dir() and "OnixHarpSyncData" in p.name
+            ]
+            assert len(harp_sync_folders) == 1
+            harp_sync_folder = harp_sync_folders[0]
 
             stream_name = "AmplifierData"
             amplifier_datasets = [
@@ -286,32 +301,72 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
             adc_depth = binary_info.pop("adc_depth")
 
             recording_list = []
-            if self.job_settings.chronic_start_flag:
-                sample_index_from_session_start = 0
-            else:
-                # If not chronic start flag, we need to parse all previous
-                # clock bin files to get the cumulative start frame
-                first_chunk_to_compress = (
-                    self.job_settings.chronic_chunks_to_compress[0]
-                )
-                first_date_to_compress = datetime.strptime(
-                    first_chunk_to_compress, "%Y-%m-%dT%H-%M-%S"
-                )
-                all_previous_clock_files = [
-                    p
-                    for p in dataset_folder.glob("**/OnixEphys_Clock_*")
-                    if extract_datetime(p) < first_date_to_compress
-                ]
-                sorted_clock_files = sorted(
-                    all_previous_clock_files,
-                    key=lambda x: extract_datetime(x),
-                )
-                sample_index_from_session_start = 0
-                for clock_file in sorted_clock_files:
-                    clock_data = np.memmap(
-                        filename=clock_file, dtype="uint64", mode="r"
+
+            # Look for sample metadata files to determine the sample index
+            # from session start. If not available or invalid, fall back to
+            # parsing clock files to get cumulative start frame.
+            are_sample_metadata_files_valid = (
+                self._are_sample_metadata_files_valid(onix_folder)
+            )
+
+            sample_index_from_session_start = None
+            if are_sample_metadata_files_valid and (
+                self.job_settings.chronic_use_sample_metadata
+            ):
+                start_samples = []
+                for amplifier_dataset in amplifier_datasets_to_compress:
+                    p = amplifier_dataset
+                    sample_metadata_file = Path(str(p).replace(
+                        "AmplifierData",
+                        "SampleMetadata"
+                    ).replace(".bin", ".json"))
+                    if sample_metadata_file.exists():
+                        with open(sample_metadata_file) as f:
+                            sample_metadata = json.load(f)
+                        start_sample = sample_metadata.get("start_sample")
+                        # The sample_start should be a non-negative integer.
+                        # This check is in place to spot overflow errors in
+                        # existing datasets.
+                        if start_sample is not None and start_sample >= 0:
+                            start_samples.append(start_sample)
+                if len(start_samples) == len(amplifier_datasets_to_compress):
+                    # If we have valid start_sample for all datasets, we can
+                    # use it
+                    sample_index_from_session_start = start_samples[0]
+                    logging.info(
+                        "Using start_sample from SampleMetadata files to "
+                        "determine sample index from session start."
                     )
-                    sample_index_from_session_start += len(clock_data)
+
+            # Fallback to parsing clock files if sample metadata files are
+            # not valid or some are missing
+            if sample_index_from_session_start is None:
+                if self.job_settings.chronic_start_flag:
+                    sample_index_from_session_start = 0
+                else:
+                    # If not chronic start flag, we need to parse all previous
+                    # clock bin files to get the cumulative start frame
+                    first_chunk_to_compress = (
+                        self.job_settings.chronic_chunks_to_compress[0]
+                    )
+                    first_date_to_compress = datetime.strptime(
+                        first_chunk_to_compress, "%Y-%m-%dT%H-%M-%S"
+                    )
+                    all_previous_clock_files = [
+                        p
+                        for p in dataset_folder.glob("**/OnixEphys_Clock_*")
+                        if extract_datetime(p) < first_date_to_compress
+                    ]
+                    sorted_clock_files = sorted(
+                        all_previous_clock_files,
+                        key=lambda x: extract_datetime(x),
+                    )
+                    sample_index_from_session_start = 0
+                    for clock_file in sorted_clock_files:
+                        clock_data = np.memmap(
+                            filename=clock_file, dtype="uint64", mode="r"
+                        )
+                        sample_index_from_session_start += len(clock_data)
             logging.info(
                 f"Sample index from session start: "
                 f"{sample_index_from_session_start}"
@@ -319,6 +374,7 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
 
             start_end_frames = {}
             cumulative_start_frame = sample_index_from_session_start
+            timestamps = []
             for amplifier_dataset in amplifier_datasets_to_compress:
                 recording = si.read_binary(amplifier_dataset, **binary_info)
 
@@ -337,8 +393,36 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
 
                 recording_list.append(recording)
 
+                # align timestamps based on harp sync data
+                clock_dataset_name = amplifier_dataset.name.replace(
+                    "AmplifierData", "Clock"
+                )
+                clock_dataset = onix_folder / clock_dataset_name
+                harp_sync_dataset_name = amplifier_dataset.name.replace(
+                    "OnixEphys_AmplifierData", "OnixHarpSyncData"
+                ).replace(".bin", ".csv")
+                harp_sync_dataset = harp_sync_folder / harp_sync_dataset_name
+                if (
+                    not clock_dataset.is_file()
+                    or not harp_sync_dataset.is_file()
+                ):
+                    logging.warning(  # pragma: no cover
+                        f"Missing clock or harp sync dataset for "
+                        f"{amplifier_dataset.name}"
+                    )
+                else:
+                    clock_data = np.memmap(
+                        clock_dataset, dtype="uint64", mode="r"
+                    )
+                    harp_data = pd.read_csv(harp_sync_dataset)
+                    timestamps_chunk = self._sync_chronic_timestamps(
+                        clock_data, harp_data, fs=recording.sampling_frequency
+                    )
+                    timestamps.append(timestamps_chunk)
+
             # concatenate recordings
             recording_concatenated = si.concatenate_recordings(recording_list)
+
             # set probe
             recording_concatenated = recording_concatenated.set_probegroup(
                 probe_group, group_mode="by_shank"
@@ -348,6 +432,12 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
             recording_concatenated.annotate(
                 sample_index_from_session_start=sample_index_from_session_start
             )
+
+            # set timestamps
+            if len(timestamps) == len(recording_list):
+                recording_concatenated.set_times(
+                    np.concatenate(timestamps).astype(np.float64)
+                )
 
             yield (
                 {
@@ -439,6 +529,110 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
                     ),
                     "n_chan": n_chan,
                 }
+
+    def _are_sample_metadata_files_valid(self, onix_folder: Path) -> bool:
+        """
+        Check if sample metadata files are present in the ONIX folder and are
+        valid (all greater than 0, no overlaps).
+        Returns an empty list if no valid sample metadata files are found.
+
+        Parameters
+        ----------
+        onix_folder : Path
+            Path to the ONIX folder.
+
+        Returns
+        -------
+            List[Path]
+                List of paths to the sample metadata files.
+        """
+        sample_metadata_files = [
+            p for p in onix_folder.iterdir() if "SampleMetadata" in p.name
+            and p.suffix == ".json"
+        ]
+        # Sort by date
+        sample_metadata_files = sorted(
+            sample_metadata_files,
+            key=lambda x: extract_datetime(x),
+        )
+        previous_end_sample = -1
+        for sample_metadata_file in sample_metadata_files:
+            with open(sample_metadata_file) as f:
+                sample_metadata = json.load(f)
+            start_sample = sample_metadata.get("start_sample")
+            if start_sample is None or start_sample < 0:  # pragma: no cover
+                logging.warning(
+                    f"Invalid start_sample in {sample_metadata_file}. "
+                    "Expected a non-negative integer. "
+                    "This file will be ignored."
+                )
+                return False
+            if start_sample <= previous_end_sample:  # pragma: no cover
+                logging.warning(
+                    f"Overlapping start_sample in {sample_metadata_file}. "
+                    "This file will be ignored."
+                )
+                return False
+            previous_end_sample = start_sample
+
+        return True
+
+    def _sync_chronic_timestamps(
+        self, clock_data: np.ndarray, harp_df: pd.DataFrame, fs: float
+    ) -> np.ndarray:
+        """
+        Syncs the timestamps for chronic data based on the clock data and
+        harp sync data.
+        The function works by finding the indices in the clock data that
+        correspond to the harp sync timestamps and interpolating the timestamps
+        uniformly in between harp timestamps. For the first and last segments
+        before the first harp timestamp and after the last harp timestamp,
+        the timestamps are extrapolated uniformly based on the sampling
+        frequency.
+
+        Parameters
+        ----------
+        clock_data : np.ndarray
+            The clock data from the Clock dataset.
+        harp_df : pd.DataFrame
+            The harp sync data from the HarpSyncData dataset.
+        fs : float
+            The sampling frequency of the recording.
+
+        Returns
+        -------
+        np.ndarray
+            The synced timestamps.
+
+        """
+        harp_indices = np.searchsorted(
+            clock_data, harp_df["Value.Clock"].values.astype(np.uint64)
+        )
+        harp_times_s = harp_df["Seconds"].values
+
+        # Create an array to hold the synced timestamps
+        timestamps = np.zeros(len(clock_data), dtype=np.float64)
+
+        # Up to first index: uniformly distribute timestamps
+        timestamps[:harp_indices[0]] = np.arange(harp_indices[0]) / fs + (
+            harp_times_s[0] - harp_indices[0] / fs
+        )
+
+        # Middle: linspace between harp sync times
+        for i, index_i in enumerate(harp_indices[:-1]):
+            timestamps[index_i:harp_indices[i + 1]] = np.linspace(
+                start=harp_times_s[i],
+                stop=harp_times_s[i + 1],
+                num=harp_indices[i + 1] - index_i,
+                endpoint=False,
+            )
+
+        # Last index to end: uniformly distribute timestamps
+        timestamps[harp_indices[-1]:] = (
+            np.arange(len(clock_data) - harp_indices[-1]) /
+            fs + harp_times_s[-1]
+        )
+        return timestamps
 
     def _check_timestamps_alignment(self) -> bool:
         """
@@ -613,13 +807,10 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
                     ]
                 )
             for f in files_to_copy:
-                dst_file_path = f.relative_to(
-                    self.job_settings.input_source
-                )
+                dst_file_path = f.relative_to(self.job_settings.input_source)
                 if self.job_settings.s3_location is not None:
                     copy_file_to_s3(
-                        f,
-                        f"{self.job_settings.s3_location}/{dst_file_path}"
+                        f, f"{self.job_settings.s3_location}/{dst_file_path}"
                     )
                 else:
                     dst_path = dst_dir / dst_file_path
@@ -635,18 +826,17 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
                 if self.job_settings.s3_location is not None:
                     copy_file_to_s3(
                         probe_json,
-                        f"{self.job_settings.s3_location}/{probe_json.name}"
+                        f"{self.job_settings.s3_location}/{probe_json.name}",
                     )
                     copy_file_to_s3(
                         binary_info_json,
                         f"{self.job_settings.s3_location}/"
-                        f"{binary_info_json.name}"
+                        f"{binary_info_json.name}",
                     )
                 else:
                     shutil.copy(probe_json, dst_dir / probe_json.name)
                     shutil.copy(
-                        binary_info_json,
-                        dst_dir / binary_info_json.name
+                        binary_info_json, dst_dir / binary_info_json.name
                     )
         elif self.job_settings.reader_name == ReaderName.OPENEPHYS:
             patterns_to_ignore = ["*.dat"]
@@ -656,7 +846,7 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
                 sync_dir_to_s3(
                     self.job_settings.input_source,
                     self.job_settings.s3_location,
-                    exclude=patterns_to_ignore
+                    exclude=patterns_to_ignore,
                 )
             else:
                 shutil.copytree(
@@ -681,7 +871,7 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
                 if self.job_settings.s3_location is not None:
                     copy_file_to_s3(
                         dst_raw_file,
-                        f"{self.job_settings.s3_location}/{rel_path_name}"
+                        f"{self.job_settings.s3_location}/{rel_path_name}",
                     )
                     # remove local file after copying to S3
                     dst_raw_file.unlink()
@@ -739,8 +929,9 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
                     f"{experiment_name}_{stream_name}.zarr"
                 )
             else:
-                zarr_path = \
+                zarr_path = (
                     output_dir / f"{experiment_name}_{stream_name}.zarr"
+                )
                 if (
                     platform.system() == "Windows"
                     and len(str(zarr_path)) > max_windows_filename_len

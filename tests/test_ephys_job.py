@@ -7,6 +7,7 @@ import shutil
 from datetime import datetime
 from pathlib import Path
 from unittest.mock import MagicMock, call, patch
+import numpy as np
 
 from numcodecs import Blosc
 from wavpack_numcodecs import WavPack
@@ -1363,6 +1364,7 @@ class TestChronicCompressJob(unittest.TestCase):
             output_directory=Path("output_dir_chronic_append"),
             compress_job_save_kwargs={"n_jobs": 1},
             chronic_chunks_to_compress=["2025-05-13T19-00-00"],
+            chronic_use_sample_metadata=False,
             reader_name="chronic",
             chronic_start_flag=True,
         )
@@ -1379,6 +1381,7 @@ class TestChronicCompressJob(unittest.TestCase):
                 "2025-05-13T20-00-00",
                 "2025-05-13T21-00-00",
             ],
+            chronic_use_sample_metadata=False,
             reader_name="chronic",
         )
         cls.chronic_job_settings_append2 = chronic_job_settings_append2
@@ -1437,6 +1440,21 @@ class TestChronicCompressJob(unittest.TestCase):
             job_settings=chronic_job_settings_multi_match
         )
 
+        chronic_job_settings_sampledata = EphysJobSettings(
+            input_source=CHRONIC_DATA_DIR,
+            output_directory=Path("output_dir_chronic"),
+            compress_job_save_kwargs={"n_jobs": 1},
+            reader_name="chronic",
+            chronic_start_flag=False,
+            chronic_use_sample_metadata=False,
+        )
+        cls.chronic_job_settings_sampledata = (
+            chronic_job_settings_sampledata
+        )
+        cls.chronic_job_settings_sampledata = EphysCompressionJob(
+            job_settings=chronic_job_settings_sampledata
+        )
+
     @classmethod
     def tearDownClass(cls):
         """Remove output directories created during tests"""
@@ -1448,6 +1466,7 @@ class TestChronicCompressJob(unittest.TestCase):
             cls.chronic_job_filter,
             cls.chronic_job_no_match,
             cls.chronic_job_multi_match,
+            cls.chronic_job_settings_sampledata,
         ]:
             output_dir = job.job_settings.output_directory
             if Path(output_dir).exists():
@@ -1466,7 +1485,7 @@ class TestChronicCompressJob(unittest.TestCase):
             read_blocks_repr.append(copied_read_block)
         extractor_str = (
             "ConcatenateSegmentRecording: 384 channels - 30.0kHz - 1 segments "
-            "- 300 samples - 0.01s (10.00 ms) \n                             "
+            "- 300 samples - 28.00s \n                             "
             "int16 dtype - 225.00 KiB"
         )
         expected_read_blocks = [
@@ -1494,7 +1513,7 @@ class TestChronicCompressJob(unittest.TestCase):
             read_blocks_repr.append(copied_read_block)
         extractor_str = (
             "ConcatenateSegmentRecording: 384 channels - 30.0kHz - 1 segments "
-            "- 100 samples - 0.00s (3.33 ms) \n                             "
+            "- 100 samples - 8.00s \n                             "
             "int16 dtype - 75.00 KiB"
         )
         expected_read_blocks = [
@@ -1509,6 +1528,47 @@ class TestChronicCompressJob(unittest.TestCase):
         )
         read_blocks_repr_str = set([json.dumps(o) for o in read_blocks_repr])
         self.assertEqual(expected_scaled_read_blocks_str, read_blocks_repr_str)
+
+    def test_read_blocks_sampledata(self):
+        """Tests _get_read_blocks method when there is sample data in the
+        metadata"""
+        chunks = [
+            "2025-05-13T19-00-00",
+            "2025-05-13T20-00-00",
+            "2025-05-13T21-00-00"
+        ]
+        for i, chunk in enumerate(chunks):
+            self.chronic_job_settings_sampledata.job_settings.\
+                chronic_chunks_to_compress = [chunk]
+            read_blocks = (
+                self.chronic_job_settings_sampledata._get_read_blocks()
+            )
+            # In this case, start samples should be 100 samples apart
+            # since the ephys and clock data have 100 samples per chunk
+            for read_block in read_blocks:
+                recording = read_block["recording"]
+                start_sample = recording.get_annotation(
+                    "sample_index_from_session_start"
+                )
+                self.assertEqual(start_sample, i * 100)
+
+        # Test with sample metadata
+        self.chronic_job_settings_sampledata.job_settings.\
+            chronic_use_sample_metadata = True
+        for i, chunk in enumerate(chunks):
+            self.chronic_job_settings_sampledata.job_settings.\
+                chronic_chunks_to_compress = [chunk]
+            read_blocks = (
+                self.chronic_job_settings_sampledata._get_read_blocks()
+            )
+            # SampleMetadata has jumps of 300 samples between chunks,
+            # so start samples should be 300 samples apart
+            for read_block in read_blocks:
+                recording = read_block["recording"]
+                start_sample = recording.get_annotation(
+                    "sample_index_from_session_start"
+                )
+                self.assertEqual(start_sample, i * 300)
 
     def test_read_blocks_no_match(self):
         """Tests _get_read_blocks method with no matching chunks"""
@@ -1586,6 +1646,16 @@ class TestChronicCompressJob(unittest.TestCase):
         recording_to_write = list(read_blocks)[0]["recording"]
         recording_loaded = load(zarr_files[0])
         check_recordings_equal(recording_loaded, recording_to_write)
+
+        # check timestamps are the same between loaded and original recording
+        self.assertTrue(
+            np.array_equal(
+                recording_loaded.get_times(), recording_to_write.get_times()
+            )
+        )
+        self.assertTrue(
+            np.all(np.diff(recording_loaded.get_times()) > 0)
+        )
 
     @patch("warnings.warn")
     def test_compress_and_append_read_blocks(
@@ -1758,6 +1828,7 @@ class TestChronicCompressJob(unittest.TestCase):
 
         # Assert calls to copy_file_to_s3
         onix_ephys_dir = CHRONIC_DATA_DIR / "OnixEphys"
+        harp_sync_dir = CHRONIC_DATA_DIR / "OnixHarpSyncData"
         expected_copy_calls = [
             call(
                 onix_ephys_dir / "OnixEphys_Clock_2025-05-13T19-00-00.bin",
@@ -1775,6 +1846,21 @@ class TestChronicCompressJob(unittest.TestCase):
                 "OnixEphys_Clock_2025-05-13T21-00-00.bin",
             ),
             call(
+                harp_sync_dir / "OnixHarpSyncData_2025-05-13T19-00-00.csv",
+                f"{expected_s3_base}/OnixHarpSyncData/"
+                "OnixHarpSyncData_2025-05-13T19-00-00.csv",
+            ),
+            call(
+                harp_sync_dir / "OnixHarpSyncData_2025-05-13T20-00-00.csv",
+                f"{expected_s3_base}/OnixHarpSyncData/"
+                "OnixHarpSyncData_2025-05-13T20-00-00.csv",
+            ),
+            call(
+                harp_sync_dir / "OnixHarpSyncData_2025-05-13T21-00-00.csv",
+                f"{expected_s3_base}/OnixHarpSyncData/"
+                "OnixHarpSyncData_2025-05-13T21-00-00.csv",
+            ),
+            call(
                 CHRONIC_DATA_DIR / "probe.json",
                 f"{expected_s3_base}/probe.json",
             ),
@@ -1786,7 +1872,7 @@ class TestChronicCompressJob(unittest.TestCase):
         mock_copy_file_to_s3.assert_has_calls(
             expected_copy_calls, any_order=True
         )
-        self.assertEqual(mock_copy_file_to_s3.call_count, 5)
+        self.assertEqual(mock_copy_file_to_s3.call_count, 11)
 
         # Assert call to write_or_append_recording_to_zarr
         expected_zarr_s3_path = (
