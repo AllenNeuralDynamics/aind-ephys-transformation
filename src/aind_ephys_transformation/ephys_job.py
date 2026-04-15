@@ -82,6 +82,14 @@ class EphysJobSettings(BasicJobSettings):
         ),
         title="Chunks to Compress",
     )
+    chronic_use_sample_metadata: bool = Field(
+        default=True,
+        description=(
+            "If True, it uses the sample metadata to determine the start of "
+            "sample for each chunk."
+        ),
+        title="Chronic Use Sample Metadata Flag",
+    )
     chronic_start_flag: bool = Field(
         default=False,
         description=(
@@ -288,32 +296,72 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
             adc_depth = binary_info.pop("adc_depth")
 
             recording_list = []
-            if self.job_settings.chronic_start_flag:
-                sample_index_from_session_start = 0
-            else:
-                # If not chronic start flag, we need to parse all previous
-                # clock bin files to get the cumulative start frame
-                first_chunk_to_compress = (
-                    self.job_settings.chronic_chunks_to_compress[0]
-                )
-                first_date_to_compress = datetime.strptime(
-                    first_chunk_to_compress, "%Y-%m-%dT%H-%M-%S"
-                )
-                all_previous_clock_files = [
-                    p
-                    for p in dataset_folder.glob("**/OnixEphys_Clock_*")
-                    if extract_datetime(p) < first_date_to_compress
-                ]
-                sorted_clock_files = sorted(
-                    all_previous_clock_files,
-                    key=lambda x: extract_datetime(x),
-                )
-                sample_index_from_session_start = 0
-                for clock_file in sorted_clock_files:
-                    clock_data = np.memmap(
-                        filename=clock_file, dtype="uint64", mode="r"
+
+            # Look for sample metadata files to determine the sample index
+            # from session start. If not available or invalid, fall back to
+            # parsing clock files to get cumulative start frame.
+            are_sample_metadata_files_valid = (
+                self._are_sample_metadata_files_valid(onix_folder)
+            )
+
+            sample_index_from_session_start = None
+            if are_sample_metadata_files_valid and (
+                self.job_settings.chronic_use_sample_metadata
+            ):
+                start_samples = []
+                for amplifier_dataset in amplifier_datasets_to_compress:
+                    p = amplifier_dataset
+                    sample_metadata_file = Path(str(p).replace(
+                        "AmplifierData",
+                        "SampleMetadata"
+                    ).replace(".bin", ".json"))
+                    if sample_metadata_file.exists():
+                        with open(sample_metadata_file) as f:
+                            sample_metadata = json.load(f)
+                        start_sample = sample_metadata.get("start_sample")
+                        # The sample_start should be a non-negative integer.
+                        # This check is in place to spot overflow errors in
+                        # existing datasets.
+                        if start_sample is not None and start_sample >= 0:
+                            start_samples.append(start_sample)
+                if len(start_samples) == len(amplifier_datasets_to_compress):
+                    # If we have valid start_sample for all datasets, we can
+                    # use it
+                    sample_index_from_session_start = start_samples[0]
+                    logging.info(
+                        "Using start_sample from SampleMetadata files to "
+                        "determine sample index from session start."
                     )
-                    sample_index_from_session_start += len(clock_data)
+
+            # Fallback to parsing clock files if sample metadata files are
+            # not valid or some are missing
+            if sample_index_from_session_start is None:
+                if self.job_settings.chronic_start_flag:
+                    sample_index_from_session_start = 0
+                else:
+                    # If not chronic start flag, we need to parse all previous
+                    # clock bin files to get the cumulative start frame
+                    first_chunk_to_compress = (
+                        self.job_settings.chronic_chunks_to_compress[0]
+                    )
+                    first_date_to_compress = datetime.strptime(
+                        first_chunk_to_compress, "%Y-%m-%dT%H-%M-%S"
+                    )
+                    all_previous_clock_files = [
+                        p
+                        for p in dataset_folder.glob("**/OnixEphys_Clock_*")
+                        if extract_datetime(p) < first_date_to_compress
+                    ]
+                    sorted_clock_files = sorted(
+                        all_previous_clock_files,
+                        key=lambda x: extract_datetime(x),
+                    )
+                    sample_index_from_session_start = 0
+                    for clock_file in sorted_clock_files:
+                        clock_data = np.memmap(
+                            filename=clock_file, dtype="uint64", mode="r"
+                        )
+                        sample_index_from_session_start += len(clock_data)
             logging.info(
                 f"Sample index from session start: "
                 f"{sample_index_from_session_start}"
@@ -476,6 +524,53 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
                     ),
                     "n_chan": n_chan,
                 }
+
+    def _are_sample_metadata_files_valid(self, onix_folder: Path) -> bool:
+        """
+        Check if sample metadata files are present in the ONIX folder and are
+        valid (all greater than 0, no overlaps).
+        Returns an empty list if no valid sample metadata files are found.
+
+        Parameters
+        ----------
+        onix_folder : Path
+            Path to the ONIX folder.
+
+        Returns
+        -------
+            List[Path]
+                List of paths to the sample metadata files.
+        """
+        sample_metadata_files = [
+            p for p in onix_folder.iterdir() if "SampleMetadata" in p.name
+            and p.suffix == ".json"
+        ]
+        # Sort by date
+        sample_metadata_files = sorted(
+            sample_metadata_files,
+            key=lambda x: extract_datetime(x),
+        )
+        previous_end_sample = -1
+        for sample_metadata_file in sample_metadata_files:
+            with open(sample_metadata_file) as f:
+                sample_metadata = json.load(f)
+            start_sample = sample_metadata.get("start_sample")
+            if start_sample is None or start_sample < 0:  # pragma: no cover
+                logging.warning(
+                    f"Invalid start_sample in {sample_metadata_file}. "
+                    "Expected a non-negative integer. "
+                    "This file will be ignored."
+                )
+                return False
+            if start_sample <= previous_end_sample:  # pragma: no cover
+                logging.warning(
+                    f"Overlapping start_sample in {sample_metadata_file}. "
+                    "This file will be ignored."
+                )
+                return False
+            previous_end_sample = start_sample
+
+        return True
 
     def _sync_chronic_timestamps(
         self, clock_data: np.ndarray, harp_df: pd.DataFrame, fs: float
