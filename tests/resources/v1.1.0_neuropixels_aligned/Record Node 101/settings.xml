@@ -470,15 +470,10 @@
               sample_rate="30000.0" channel_count="8">
         <PARAMETERS/>
       </STREAM>
-      <CUSTOM_PARAMETERS path="D:" engine="BINARY" recordEvents="1" recordSpikes="1" fifoMonitorsVisible="1">
-        <STREAM isMainStream="1" sync_line="0" name="ProbeB" source_node_id="100"
-                sample_rate="30000.0" channel_count="384" device_name="Neuropixels 2.0 - Single Shank"
-                recording_state="ALL"/>
-        <STREAM isMainStream="0" sync_line="0" name="ProbeC" source_node_id="100"
-                sample_rate="30000.0" channel_count="384" device_name="Neuropixels 2.0 - Single Shank"
-                recording_state="ALL"/>
-        <STREAM isMainStream="0" sync_line="0" name="PXIe-6341" source_node_id="103"
-                sample_rate="30000.0" channel_count="8" recording_state="ALL"/>
+      <CUSTOM_PARAMETERS fifoMonitorsVisible="1">
+        <SYNC_STATUS streamKey="101|ProbeB" status="HARP_SYNCED"/>
+        <SYNC_STATUS streamKey="101|ProbeC" status="HARP_SYNCED"/>
+        <SYNC_STATUS streamKey="103|PXIe-6341" status="HARP_SYNCED"/>
       </CUSTOM_PARAMETERS>
       <EDITOR isCollapsed="0" isDrawerOpen="1" displayName="Record Node" activeStream="0"/>
     </PROCESSOR>
