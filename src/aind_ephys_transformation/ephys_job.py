@@ -12,6 +12,7 @@ from typing import Iterator, Literal, Optional, List
 from pydantic import model_validator, field_validator
 
 import numpy as np
+import pandas as pd
 from aind_data_transformation.core import (
     BasicJobSettings,
     GenericEtl,
@@ -187,9 +188,7 @@ class EphysJobSettings(BasicJobSettings):
         """Validates s3_location."""
         if v is not None:
             if not v.startswith("s3://"):
-                raise ValueError(
-                    "S3 location must start with 's3://'."
-                )
+                raise ValueError("S3 location must start with 's3://'.")
             # remuve trailing slash if present
             if v.endswith("/"):
                 v = v[:-1]
@@ -218,6 +217,14 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
             ]
             assert len(onix_folders) == 1
             onix_folder = onix_folders[0]
+
+            harp_sync_folders = [
+                p
+                for p in dataset_folder.iterdir()
+                if p.is_dir() and "OnixHarpSyncData" in p.name
+            ]
+            assert len(harp_sync_folders) == 1
+            harp_sync_folder = harp_sync_folders[0]
 
             stream_name = "AmplifierData"
             amplifier_datasets = [
@@ -362,6 +369,7 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
 
             start_end_frames = {}
             cumulative_start_frame = sample_index_from_session_start
+            timestamps = []
             for amplifier_dataset in amplifier_datasets_to_compress:
                 recording = si.read_binary(amplifier_dataset, **binary_info)
 
@@ -380,8 +388,36 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
 
                 recording_list.append(recording)
 
+                # align timestamps based on harp sync data
+                clock_dataset_name = amplifier_dataset.name.replace(
+                    "AmplifierData", "Clock"
+                )
+                clock_dataset = onix_folder / clock_dataset_name
+                harp_sync_dataset_name = amplifier_dataset.name.replace(
+                    "OnixEphys_AmplifierData", "OnixHarpSyncData"
+                ).replace(".bin", ".csv")
+                harp_sync_dataset = harp_sync_folder / harp_sync_dataset_name
+                if (
+                    not clock_dataset.is_file()
+                    or not harp_sync_dataset.is_file()
+                ):
+                    logging.warning(  # pragma: no cover
+                        f"Missing clock or harp sync dataset for "
+                        f"{amplifier_dataset.name}"
+                    )
+                else:
+                    clock_data = np.memmap(
+                        clock_dataset, dtype="uint64", mode="r"
+                    )
+                    harp_data = pd.read_csv(harp_sync_dataset)
+                    timestamps_chunk = self._sync_chronic_timestamps(
+                        clock_data, harp_data, fs=recording.sampling_frequency
+                    )
+                    timestamps.append(timestamps_chunk)
+
             # concatenate recordings
             recording_concatenated = si.concatenate_recordings(recording_list)
+
             # set probe
             recording_concatenated = recording_concatenated.set_probegroup(
                 probe_group, group_mode="by_shank"
@@ -391,6 +427,12 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
             recording_concatenated.annotate(
                 sample_index_from_session_start=sample_index_from_session_start
             )
+
+            # set timestamps
+            if len(timestamps) == len(recording_list):
+                recording_concatenated.set_times(
+                    np.concatenate(timestamps).astype(np.float64)
+                )
 
             yield (
                 {
@@ -529,6 +571,63 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
             previous_end_sample = start_sample
 
         return True
+
+    def _sync_chronic_timestamps(
+        self, clock_data: np.ndarray, harp_df: pd.DataFrame, fs: float
+    ) -> np.ndarray:
+        """
+        Syncs the timestamps for chronic data based on the clock data and
+        harp sync data.
+        The function works by finding the indices in the clock data that
+        correspond to the harp sync timestamps and interpolating the timestamps
+        uniformly in between harp timestamps. For the first and last segments
+        before the first harp timestamp and after the last harp timestamp,
+        the timestamps are extrapolated uniformly based on the sampling
+        frequency.
+
+        Parameters
+        ----------
+        clock_data : np.ndarray
+            The clock data from the Clock dataset.
+        harp_df : pd.DataFrame
+            The harp sync data from the HarpSyncData dataset.
+        fs : float
+            The sampling frequency of the recording.
+
+        Returns
+        -------
+        np.ndarray
+            The synced timestamps.
+
+        """
+        harp_indices = np.searchsorted(
+            clock_data, harp_df["Value.Clock"].values.astype(np.uint64)
+        )
+        harp_times_s = harp_df["Seconds"].values
+
+        # Create an array to hold the synced timestamps
+        timestamps = np.zeros(len(clock_data), dtype=np.float64)
+
+        # Up to first index: uniformly distribute timestamps
+        timestamps[:harp_indices[0]] = np.arange(harp_indices[0]) / fs + (
+            harp_times_s[0] - harp_indices[0] / fs
+        )
+
+        # Middle: linspace between harp sync times
+        for i, index_i in enumerate(harp_indices[:-1]):
+            timestamps[index_i:harp_indices[i + 1]] = np.linspace(
+                start=harp_times_s[i],
+                stop=harp_times_s[i + 1],
+                num=harp_indices[i + 1] - index_i,
+                endpoint=False,
+            )
+
+        # Last index to end: uniformly distribute timestamps
+        timestamps[harp_indices[-1]:] = (
+            np.arange(len(clock_data) - harp_indices[-1]) /
+            fs + harp_times_s[-1]
+        )
+        return timestamps
 
     def _check_timestamps_alignment(self) -> bool:
         """
@@ -687,13 +786,10 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
                     ]
                 )
             for f in files_to_copy:
-                dst_file_path = f.relative_to(
-                    self.job_settings.input_source
-                )
+                dst_file_path = f.relative_to(self.job_settings.input_source)
                 if self.job_settings.s3_location is not None:
                     copy_file_to_s3(
-                        f,
-                        f"{self.job_settings.s3_location}/{dst_file_path}"
+                        f, f"{self.job_settings.s3_location}/{dst_file_path}"
                     )
                 else:
                     dst_path = dst_dir / dst_file_path
@@ -709,18 +805,17 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
                 if self.job_settings.s3_location is not None:
                     copy_file_to_s3(
                         probe_json,
-                        f"{self.job_settings.s3_location}/{probe_json.name}"
+                        f"{self.job_settings.s3_location}/{probe_json.name}",
                     )
                     copy_file_to_s3(
                         binary_info_json,
                         f"{self.job_settings.s3_location}/"
-                        f"{binary_info_json.name}"
+                        f"{binary_info_json.name}",
                     )
                 else:
                     shutil.copy(probe_json, dst_dir / probe_json.name)
                     shutil.copy(
-                        binary_info_json,
-                        dst_dir / binary_info_json.name
+                        binary_info_json, dst_dir / binary_info_json.name
                     )
         elif self.job_settings.reader_name == ReaderName.OPENEPHYS:
             patterns_to_ignore = ["*.dat"]
@@ -730,7 +825,7 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
                 sync_dir_to_s3(
                     self.job_settings.input_source,
                     self.job_settings.s3_location,
-                    exclude=patterns_to_ignore
+                    exclude=patterns_to_ignore,
                 )
             else:
                 shutil.copytree(
@@ -755,7 +850,7 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
                 if self.job_settings.s3_location is not None:
                     copy_file_to_s3(
                         dst_raw_file,
-                        f"{self.job_settings.s3_location}/{rel_path_name}"
+                        f"{self.job_settings.s3_location}/{rel_path_name}",
                     )
                     # remove local file after copying to S3
                     dst_raw_file.unlink()
@@ -813,8 +908,9 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
                     f"{experiment_name}_{stream_name}.zarr"
                 )
             else:
-                zarr_path = \
+                zarr_path = (
                     output_dir / f"{experiment_name}_{stream_name}.zarr"
+                )
                 if (
                     platform.system() == "Windows"
                     and len(str(zarr_path)) > max_windows_filename_len

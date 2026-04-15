@@ -7,6 +7,7 @@ import shutil
 from datetime import datetime
 from pathlib import Path
 from unittest.mock import MagicMock, call, patch
+import numpy as np
 
 from numcodecs import Blosc
 from wavpack_numcodecs import WavPack
@@ -1468,7 +1469,7 @@ class TestChronicCompressJob(unittest.TestCase):
             read_blocks_repr.append(copied_read_block)
         extractor_str = (
             "ConcatenateSegmentRecording: 384 channels - 30.0kHz - 1 segments "
-            "- 300 samples - 0.01s (10.00 ms) \n                             "
+            "- 300 samples - 28.00s \n                             "
             "int16 dtype - 225.00 KiB"
         )
         expected_read_blocks = [
@@ -1496,7 +1497,7 @@ class TestChronicCompressJob(unittest.TestCase):
             read_blocks_repr.append(copied_read_block)
         extractor_str = (
             "ConcatenateSegmentRecording: 384 channels - 30.0kHz - 1 segments "
-            "- 100 samples - 0.00s (3.33 ms) \n                             "
+            "- 100 samples - 8.00s \n                             "
             "int16 dtype - 75.00 KiB"
         )
         expected_read_blocks = [
@@ -1629,6 +1630,16 @@ class TestChronicCompressJob(unittest.TestCase):
         recording_to_write = list(read_blocks)[0]["recording"]
         recording_loaded = load(zarr_files[0])
         check_recordings_equal(recording_loaded, recording_to_write)
+
+        # check timestamps are the same between loaded and original recording
+        self.assertTrue(
+            np.array_equal(
+                recording_loaded.get_times(), recording_to_write.get_times()
+            )
+        )
+        self.assertTrue(
+            np.all(np.diff(recording_loaded.get_times()) > 0)
+        )
 
     @patch("warnings.warn")
     def test_compress_and_append_read_blocks(
@@ -1801,6 +1812,7 @@ class TestChronicCompressJob(unittest.TestCase):
 
         # Assert calls to copy_file_to_s3
         onix_ephys_dir = CHRONIC_DATA_DIR / "OnixEphys"
+        harp_sync_dir = CHRONIC_DATA_DIR / "OnixHarpSyncData"
         expected_copy_calls = [
             call(
                 onix_ephys_dir / "OnixEphys_Clock_2025-05-13T19-00-00.bin",
@@ -1816,6 +1828,21 @@ class TestChronicCompressJob(unittest.TestCase):
                 onix_ephys_dir / "OnixEphys_Clock_2025-05-13T21-00-00.bin",
                 f"{expected_s3_base}/OnixEphys/"
                 "OnixEphys_Clock_2025-05-13T21-00-00.bin",
+            ),
+            call(
+                harp_sync_dir / "OnixHarpSyncData_2025-05-13T19-00-00.csv",
+                f"{expected_s3_base}/OnixHarpSyncData/"
+                "OnixHarpSyncData_2025-05-13T19-00-00.csv",
+            ),
+            call(
+                harp_sync_dir / "OnixHarpSyncData_2025-05-13T20-00-00.csv",
+                f"{expected_s3_base}/OnixHarpSyncData/"
+                "OnixHarpSyncData_2025-05-13T20-00-00.csv",
+            ),
+            call(
+                harp_sync_dir / "OnixHarpSyncData_2025-05-13T21-00-00.csv",
+                f"{expected_s3_base}/OnixHarpSyncData/"
+                "OnixHarpSyncData_2025-05-13T21-00-00.csv",
             ),
             call(
                 CHRONIC_DATA_DIR / "probe.json",
