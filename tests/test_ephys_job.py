@@ -1856,7 +1856,7 @@ class TestChronicCompressJob(unittest.TestCase):
         mock_copy_file_to_s3.assert_has_calls(
             expected_copy_calls, any_order=True
         )
-        self.assertEqual(mock_copy_file_to_s3.call_count, 8)
+        self.assertEqual(mock_copy_file_to_s3.call_count, 11)
 
         # Assert call to write_or_append_recording_to_zarr
         expected_zarr_s3_path = (
