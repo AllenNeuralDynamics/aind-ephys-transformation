@@ -673,8 +673,12 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
                     ]
                     if len(record_node) > 0:
                         record_node = record_node[0]
-                        custom_parameters = record_node.find("CUSTOM_PARAMETERS")
-                        sync_statuses = custom_parameters.findall("SYNC_STATUS")
+                        custom_parameters = record_node.find(
+                            "CUSTOM_PARAMETERS"
+                        )
+                        sync_statuses = custom_parameters.findall(
+                            "SYNC_STATUS"
+                        )
                         all_synced = all(
                             sync_status.attrib["status"] == "HARP_SYNCED"
                             for sync_status in sync_statuses
