@@ -22,7 +22,9 @@ dependencies = [
     'probeinterface>=0.3.2',
     'wavpack-numcodecs==0.2.2; python_version<"3.13"',
     'wavpack-numcodecs>=0.2.3; python_version>="3.13"',
-    's3fs'
+    's3fs',
+    'python-json-logger',
+    'PyYAML'
 ]
 
 [project.optional-dependencies]
