@@ -415,6 +415,8 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
                         clock_dataset, dtype="uint64", mode="r"
                     )
                     harp_data = pd.read_csv(harp_sync_dataset)
+                    # Drop rows with missing values (NaNs/zeros)
+                    harp_data = harp_data[harp_data != 0].dropna()
                     timestamps_chunk = self._sync_chronic_timestamps(
                         clock_data, harp_data, fs=recording.sampling_frequency
                     )
