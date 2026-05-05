@@ -59,3 +59,4 @@ loggers:
       - console
     level: INFO
     propagate: false
+  
