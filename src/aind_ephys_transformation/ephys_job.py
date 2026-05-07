@@ -377,7 +377,7 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
             timestamps = []
             for amplifier_dataset in amplifier_datasets_to_compress:
                 recording = si.read_binary(amplifier_dataset, **binary_info)
-
+                recording_samples = recording.get_num_samples()
                 # unsigned to signed
                 recording = spre.unsigned_to_signed(
                     recording, bit_depth=adc_depth
@@ -390,8 +390,6 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
                 )
                 # update cumulative start frame
                 cumulative_start_frame += recording.get_num_frames()
-
-                recording_list.append(recording)
 
                 # align timestamps based on harp sync data
                 clock_dataset_name = amplifier_dataset.name.replace(
@@ -414,11 +412,24 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
                     clock_data = np.memmap(
                         clock_dataset, dtype="uint64", mode="r"
                     )
-                    harp_data = pd.read_csv(harp_sync_dataset)
+                    harp_data = pd.read_csv(harp_sync_dataset, index_col=False)
+                    # Drop rows with missing values (NaNs/zeros)
+                    harp_data = harp_data[harp_data != 0].dropna()
                     timestamps_chunk = self._sync_chronic_timestamps(
                         clock_data, harp_data, fs=recording.sampling_frequency
                     )
+                    timestamps_samples = len(timestamps_chunk)
+                    if timestamps_samples != recording_samples:
+                        logging.warning(  # pragma: no cover
+                            f"Number of timestamps ({timestamps_samples}) "
+                            f"does not match recording samples "
+                            f"({recording_samples}). "
+                            f"Skipping chunk {amplifier_dataset.name}!"
+                        )
+                        continue  # pragma: no cover
+
                     timestamps.append(timestamps_chunk)
+                recording_list.append(recording)
 
             # concatenate recordings
             recording_concatenated = si.concatenate_recordings(recording_list)
