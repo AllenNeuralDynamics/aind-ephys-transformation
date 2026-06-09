@@ -516,6 +516,8 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
                 self.job_settings.input_source,
             )
             for dat_file in self.job_settings.input_source.glob("**/*.dat"):
+                if dat_file.stat().st_size == 0:
+                    continue
                 oe_stream_name = dat_file.parent.name
                 si_stream_name = [
                     stream_name
@@ -527,12 +529,14 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
                     block_index=0,
                     stream_name=si_stream_name,
                 ).get_num_channels()
+                
                 data = np.memmap(
                     filename=str(dat_file),
                     dtype="int16",
                     order="C",
                     mode="r",
                 ).reshape(-1, n_chan)
+
                 yield {
                     "data": data,
                     "relative_path_name": str(
