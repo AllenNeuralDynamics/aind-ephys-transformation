@@ -531,7 +531,7 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
                     block_index=0,
                     stream_name=si_stream_name,
                 ).get_num_channels()
-                
+
                 data = np.memmap(
                     filename=str(dat_file),
                     dtype="int16",
