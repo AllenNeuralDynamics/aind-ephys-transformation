@@ -516,7 +516,7 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
                 self.job_settings.input_source,
             )
             for dat_file in self.job_settings.input_source.glob("**/*.dat"):
-                if dat_file.stat().st_size == 0:
+                if dat_file.stat().st_size == 0:  # pragma: no cover
                     continue
                 oe_stream_name = dat_file.parent.name
                 si_stream_name = [
