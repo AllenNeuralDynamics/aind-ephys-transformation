@@ -488,6 +488,8 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
                         block_index=block_index,
                         load_sync_timestamps=True,
                     )
+                    if rec.get_num_samples() == 0:  # pragma: no cover
+                        continue
                     yield (
                         {
                             "recording": rec,
