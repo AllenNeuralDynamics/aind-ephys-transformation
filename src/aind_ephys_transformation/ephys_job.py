@@ -419,17 +419,26 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
                         clock_data, harp_data, fs=recording.sampling_frequency
                     )
                     timestamps_samples = len(timestamps_chunk)
-                    if timestamps_samples != recording_samples:  # pragma: no cover
+                    if (
+                        timestamps_samples != recording_samples
+                    ):  # pragma: no cover
+                        final_samples = min(
+                            timestamps_samples,
+                            recording_samples
+                        )
                         logging.warning(
                             f"Number of timestamps ({timestamps_samples}) "
                             f"does not match recording samples "
                             f"({recording_samples}). "
-                            f"Cutting both to {min(timestamps_samples, recording_samples)}."
+                            f"Cutting both to {final_samples}."
                         )
                         if timestamps_samples < recording_samples:
-                            recording = recording.frame_slice(start_frame=0, end_frame=timestamps_samples)
+                            recording = recording.frame_slice(
+                                start_frame=0,
+                                end_frame=final_samples
+                            )
                         else:
-                            timestamps_chunk = timestamps_chunk[:recording_samples]
+                            timestamps_chunk = timestamps_chunk[:final_samples]
 
                     timestamps.append(timestamps_chunk)
                 recording_list.append(recording)
