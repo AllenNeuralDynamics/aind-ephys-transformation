@@ -13,6 +13,11 @@ from numcodecs import Blosc
 from wavpack_numcodecs import WavPack
 
 from spikeinterface import load
+from spikeinterface.extractors import (
+    read_openephys,
+    get_neo_num_blocks,
+    get_neo_streams
+)
 from spikeinterface.core.testing import check_recordings_equal
 
 from aind_data_transformation.core import JobResponse
@@ -24,6 +29,7 @@ from aind_ephys_transformation.models import CompressorName
 
 TEST_DIR = Path(os.path.dirname(os.path.realpath(__file__))) / "resources"
 OE_DATA_DIR = TEST_DIR / "v0.6.x_neuropixels_multiexp_multistream"
+OE_DATA_DIR_EMPTY = TEST_DIR / "v0.6.x_neuropixels_multiexp_empty_streams"
 OE_DATA_DIR_NOT_ALIGNED = TEST_DIR / "v0.6.x_neuropixels_not_aligned"
 OE_DATA_DIR_V110_SYNC = TEST_DIR / "v1.1.0_neuropixels_aligned"
 OE_DATA_DIR_V110_NO_SYNC = TEST_DIR / "v1.1.0_neuropixels_not_aligned"
@@ -43,6 +49,24 @@ class TestEphysJob(unittest.TestCase):
         )
         cls.basic_job_settings = basic_job_settings
         cls.basic_job = EphysCompressionJob(job_settings=basic_job_settings)
+
+        job_settings_empty = EphysJobSettings(
+            input_source=OE_DATA_DIR_EMPTY,
+            output_directory=Path("output_dir_empty"),
+            compress_job_save_kwargs={"n_jobs": 1},
+        )
+        cls.job_settings_empty = job_settings_empty
+        cls.job_empty = EphysCompressionJob(job_settings=job_settings_empty)
+        # experiment1/recording1/ProbeB and experiment6/recording1/ProbeC
+        cls.NUM_EMPTY_STREAMS = 2
+
+    @classmethod
+    def tearDownClass(cls):
+        """Clean up output directories after tests"""
+        shutil.rmtree(
+            cls.job_settings_empty.output_directory,
+            ignore_errors=True
+        )
 
     @patch("warnings.warn")
     def test_get_compressor_default(self, _: MagicMock):
@@ -374,6 +398,53 @@ class TestEphysJob(unittest.TestCase):
             [json.dumps(o) for o in streams_to_clip_just_shape]
         )
         self.assertEqual(expected_output_str, streams_to_clip_just_shape_str)
+
+    def test_empty_streams_get_streams_to_clip(self):
+        """Tests _get_streams_to_clip with empty streams"""
+        streams_to_clip = self.job_empty._get_streams_to_clip()
+        streams_to_clip_just_shape = []
+        empty_streams = []
+        for stream_to_clip in streams_to_clip:
+            stream_to_clip_copy = {
+                "relative_path_name": stream_to_clip["relative_path_name"],
+                "n_chan": stream_to_clip["n_chan"],
+                "data": stream_to_clip["data"].shape,
+            }
+            if len(stream_to_clip["data"]) == 0:
+                empty_streams.append(stream_to_clip_copy)
+            streams_to_clip_just_shape.append(stream_to_clip_copy)
+
+        # check that 2 data streams are empty
+        self.assertEqual(len(empty_streams), self.NUM_EMPTY_STREAMS)
+
+    def test_empty_streams_copy_and_clip_data(self):
+        """Tests _copy_and_clip_data with empty streams"""
+        streams_to_clip = self.job_empty._get_streams_to_clip()
+        dst_dir = self.job_empty.job_settings.output_directory / "tmp"
+        self.job_empty._copy_and_clip_data(
+            dst_dir=dst_dir,
+            stream_gen=streams_to_clip
+        )
+        # check that there are two empty .dat files in the output directory
+        dat_files = list(dst_dir.glob("**/*.dat"))
+        empty_dat_files = []
+        for dat_file in dat_files:
+            if dat_file.stat().st_size == 0:
+                empty_dat_files.append(dat_file)
+        self.assertEqual(len(empty_dat_files), self.NUM_EMPTY_STREAMS)
+
+        num_blocks = get_neo_num_blocks("openephysbinary", dst_dir)
+        for block_index in range(num_blocks):
+            stream_names, _ = get_neo_streams(
+                "openephysbinary",
+                dst_dir,
+            )
+            for stream_name in stream_names:
+                recording = read_openephys(
+                    dst_dir,
+                    block_index=block_index,
+                    stream_name=stream_name
+                )
 
     @patch("shutil.copytree")
     @patch("shutil.ignore_patterns")
