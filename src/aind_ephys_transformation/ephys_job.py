@@ -377,7 +377,7 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
             timestamps = []
             for amplifier_dataset in amplifier_datasets_to_compress:
                 recording = si.read_binary(amplifier_dataset, **binary_info)
-                recording_samples = recording.get_num_samples()
+                recording_samples = recording.get_num_samples(segment_index=0)
                 # unsigned to signed
                 recording = spre.unsigned_to_signed(
                     recording, bit_depth=adc_depth
@@ -500,8 +500,26 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
                         block_index=block_index,
                         load_sync_timestamps=True,
                     )
-                    if rec.get_num_samples() == 0:  # pragma: no cover
+                    # Look for empty segments and select only
+                    # non-empty segments.
+                    non_empty_segment_indices = []
+                    for segment_index in range(rec.get_num_segments()):
+                        if rec.get_num_samples(segment_index) > 0:
+                            non_empty_segment_indices.append(segment_index)
+                    if len(non_empty_segment_indices) == 0:  # pragma: no cover
+                        # Empty stream: skip this stream entirely
                         continue
+                    elif (
+                        len(non_empty_segment_indices) < rec.get_num_segments()
+                    ):  # pragma: no cover
+                        # Some segments are empty: select only
+                        # non-empty segments
+                        logging.warning(
+                            f"Block {block_index}, stream {stream_name} "
+                            f"has empty segments. Selecting only "
+                            f"non-empty segments: {non_empty_segment_indices}"
+                        )
+                        rec = rec.select_segments(non_empty_segment_indices)
                     yield (
                         {
                             "recording": rec,
