@@ -440,7 +440,7 @@ class TestEphysJob(unittest.TestCase):
                 dst_dir,
             )
             for stream_name in stream_names:
-                recording = read_openephys(
+                _ = read_openephys(
                     dst_dir,
                     block_index=block_index,
                     stream_name=stream_name
