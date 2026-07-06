@@ -377,7 +377,7 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
             timestamps = []
             for amplifier_dataset in amplifier_datasets_to_compress:
                 recording = si.read_binary(amplifier_dataset, **binary_info)
-                recording_samples = recording.get_num_samples()
+                recording_samples = recording.get_num_samples(segment_index=0)
                 # unsigned to signed
                 recording = spre.unsigned_to_signed(
                     recording, bit_depth=adc_depth
@@ -500,8 +500,26 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
                         block_index=block_index,
                         load_sync_timestamps=True,
                     )
-                    if rec.get_num_samples() == 0:  # pragma: no cover
-                        continue
+                    # Look for empty segments and select only
+                    # non-empty segments.
+                    non_empty_segment_indices = []
+                    for segment_index in range(rec.get_num_segments()):
+                        if rec.get_num_samples(segment_index) > 0:
+                            non_empty_segment_indices.append(segment_index)
+                    if len(non_empty_segment_indices) == 0:
+                        # Empty stream: skip this stream entirely
+                        continue  # pragma: no cover
+                    elif (
+                        len(non_empty_segment_indices) < rec.get_num_segments()
+                    ):  # pragma: no cover
+                        # Some segments are empty: select only
+                        # non-empty segments
+                        logging.warning(
+                            f"Block {block_index}, stream {stream_name} "
+                            f"has empty segments. Selecting only "
+                            f"non-empty segments: {non_empty_segment_indices}"
+                        )
+                        rec = rec.select_segments(non_empty_segment_indices)
                     yield (
                         {
                             "recording": rec,
@@ -530,8 +548,6 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
                 self.job_settings.input_source,
             )
             for dat_file in self.job_settings.input_source.glob("**/*.dat"):
-                if dat_file.stat().st_size == 0:  # pragma: no cover
-                    continue
                 oe_stream_name = dat_file.parent.name
                 si_stream_name = [
                     stream_name
@@ -544,12 +560,15 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
                     stream_name=si_stream_name,
                 ).get_num_channels()
 
-                data = np.memmap(
-                    filename=str(dat_file),
-                    dtype="int16",
-                    order="C",
-                    mode="r",
-                ).reshape(-1, n_chan)
+                if dat_file.stat().st_size == 0:  # pragma: no cover
+                    data = np.array([], dtype="int16")
+                else:
+                    data = np.memmap(
+                        filename=str(dat_file),
+                        dtype="int16",
+                        order="C",
+                        mode="r",
+                    ).reshape(-1, n_chan)
 
                 yield {
                     "data": data,
@@ -912,14 +931,18 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
                 rel_path_name = stream["relative_path_name"]
                 n_chan = stream["n_chan"]
                 dst_raw_file = dst_dir / rel_path_name
-                dst_data = np.memmap(
-                    filename=dst_raw_file,
-                    dtype="int16",
-                    shape=(self.job_settings.clip_n_frames, n_chan),
-                    order="C",
-                    mode="w+",
-                )
-                dst_data[:] = data[: self.job_settings.clip_n_frames]
+                if len(data) > 0:
+                    dst_data = np.memmap(
+                        filename=dst_raw_file,
+                        dtype="int16",
+                        shape=(self.job_settings.clip_n_frames, n_chan),
+                        order="C",
+                        mode="w+",
+                    )
+                    dst_data[:] = data[: self.job_settings.clip_n_frames]
+                else:
+                    # Make an empty file if the original .dat file is empty
+                    dst_raw_file.touch()
                 if self.job_settings.s3_location is not None:
                     copy_file_to_s3(
                         dst_raw_file,

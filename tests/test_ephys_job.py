@@ -3,7 +3,7 @@
 import json
 import os
 import unittest
-import shutil
+import tempfile
 from datetime import datetime
 from pathlib import Path
 from unittest.mock import MagicMock, call, patch
@@ -13,6 +13,11 @@ from numcodecs import Blosc
 from wavpack_numcodecs import WavPack
 
 from spikeinterface import load
+from spikeinterface.extractors import (
+    read_openephys,
+    get_neo_num_blocks,
+    get_neo_streams
+)
 from spikeinterface.core.testing import check_recordings_equal
 
 from aind_data_transformation.core import JobResponse
@@ -24,6 +29,7 @@ from aind_ephys_transformation.models import CompressorName
 
 TEST_DIR = Path(os.path.dirname(os.path.realpath(__file__))) / "resources"
 OE_DATA_DIR = TEST_DIR / "v0.6.x_neuropixels_multiexp_multistream"
+OE_DATA_DIR_EMPTY = TEST_DIR / "v0.6.x_neuropixels_multiexp_empty_streams"
 OE_DATA_DIR_NOT_ALIGNED = TEST_DIR / "v0.6.x_neuropixels_not_aligned"
 OE_DATA_DIR_V110_SYNC = TEST_DIR / "v1.1.0_neuropixels_aligned"
 OE_DATA_DIR_V110_NO_SYNC = TEST_DIR / "v1.1.0_neuropixels_not_aligned"
@@ -36,13 +42,30 @@ class TestEphysJob(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         """Setup basic job settings and job that can be used across tests"""
+        cls.test_dir = tempfile.TemporaryDirectory()
+        cls.test_dir_path = Path(cls.test_dir.name)
         basic_job_settings = EphysJobSettings(
             input_source=OE_DATA_DIR,
-            output_directory=Path("output_dir"),
+            output_directory=cls.test_dir_path / "output_dir",
             compress_job_save_kwargs={"n_jobs": 1},
         )
         cls.basic_job_settings = basic_job_settings
         cls.basic_job = EphysCompressionJob(job_settings=basic_job_settings)
+
+        job_settings_empty = EphysJobSettings(
+            input_source=OE_DATA_DIR_EMPTY,
+            output_directory=cls.test_dir_path / "output_dir_empty",
+            compress_job_save_kwargs={"n_jobs": 1},
+        )
+        cls.job_settings_empty = job_settings_empty
+        cls.job_empty = EphysCompressionJob(job_settings=job_settings_empty)
+        # experiment1/recording1/ProbeB and experiment6/recording1/ProbeC
+        cls.NUM_EMPTY_STREAMS = 2
+
+    @classmethod
+    def tearDownClass(cls):
+        """Clean up output directories after tests"""
+        cls.test_dir.cleanup()
 
     @patch("warnings.warn")
     def test_get_compressor_default(self, _: MagicMock):
@@ -375,6 +398,53 @@ class TestEphysJob(unittest.TestCase):
         )
         self.assertEqual(expected_output_str, streams_to_clip_just_shape_str)
 
+    def test_empty_streams_get_streams_to_clip(self):
+        """Tests _get_streams_to_clip with empty streams"""
+        streams_to_clip = self.job_empty._get_streams_to_clip()
+        streams_to_clip_just_shape = []
+        empty_streams = []
+        for stream_to_clip in streams_to_clip:
+            stream_to_clip_copy = {
+                "relative_path_name": stream_to_clip["relative_path_name"],
+                "n_chan": stream_to_clip["n_chan"],
+                "data": stream_to_clip["data"].shape,
+            }
+            if len(stream_to_clip["data"]) == 0:
+                empty_streams.append(stream_to_clip_copy)
+            streams_to_clip_just_shape.append(stream_to_clip_copy)
+
+        # check that 2 data streams are empty
+        self.assertEqual(len(empty_streams), self.NUM_EMPTY_STREAMS)
+
+    def test_empty_streams_copy_and_clip_data(self):
+        """Tests _copy_and_clip_data with empty streams"""
+        streams_to_clip = self.job_empty._get_streams_to_clip()
+        dst_dir = self.test_dir_path / "output_dir_empty"
+        self.job_empty._copy_and_clip_data(
+            dst_dir=dst_dir,
+            stream_gen=streams_to_clip
+        )
+        # check that there are two empty .dat files in the output directory
+        dat_files = list(dst_dir.glob("**/*.dat"))
+        empty_dat_files = []
+        for dat_file in dat_files:
+            if dat_file.stat().st_size == 0:
+                empty_dat_files.append(dat_file)
+        self.assertEqual(len(empty_dat_files), self.NUM_EMPTY_STREAMS)
+
+        num_blocks = get_neo_num_blocks("openephysbinary", dst_dir)
+        for block_index in range(num_blocks):
+            stream_names, _ = get_neo_streams(
+                "openephysbinary",
+                dst_dir,
+            )
+            for stream_name in stream_names:
+                _ = read_openephys(
+                    dst_dir,
+                    block_index=block_index,
+                    stream_name=stream_name
+                )
+
     @patch("shutil.copytree")
     @patch("shutil.ignore_patterns")
     @patch("numpy.memmap")
@@ -528,7 +598,7 @@ class TestEphysJob(unittest.TestCase):
                 call(
                     format="zarr",
                     folder=(
-                        Path("output_dir")
+                        self.test_dir_path / "output_dir"
                         / "compressed"
                         / (
                             "experiment1_Record Node 101#NI-DAQmx-103"
@@ -549,7 +619,7 @@ class TestEphysJob(unittest.TestCase):
                 call(
                     format="zarr",
                     folder=(
-                        Path("output_dir")
+                        self.test_dir_path / "output_dir"
                         / "compressed"
                         / (
                             "experiment3_Record Node 101#NI-DAQmx-103"
@@ -570,7 +640,7 @@ class TestEphysJob(unittest.TestCase):
                 call(
                     format="zarr",
                     folder=(
-                        Path("output_dir")
+                        self.test_dir_path / "output_dir"
                         / "compressed"
                         / (
                             "experiment6_Record Node 101#NI-DAQmx-103"
@@ -595,7 +665,7 @@ class TestEphysJob(unittest.TestCase):
                 call(
                     format="zarr",
                     folder=(
-                        Path("output_dir")
+                        self.test_dir_path / "output_dir"
                         / "compressed"
                         / (
                             "experiment1_Record Node 101#Neuropix-PXI-100"
@@ -616,7 +686,7 @@ class TestEphysJob(unittest.TestCase):
                 call(
                     format="zarr",
                     folder=(
-                        Path("output_dir")
+                        self.test_dir_path / "output_dir"
                         / "compressed"
                         / (
                             "experiment1_Record Node 101#Neuropix-PXI-100"
@@ -637,7 +707,7 @@ class TestEphysJob(unittest.TestCase):
                 call(
                     format="zarr",
                     folder=(
-                        Path("output_dir")
+                        self.test_dir_path / "output_dir"
                         / "compressed"
                         / (
                             "experiment3_Record Node 101#Neuropix-PXI-100"
@@ -658,7 +728,7 @@ class TestEphysJob(unittest.TestCase):
                 call(
                     format="zarr",
                     folder=(
-                        Path("output_dir")
+                        self.test_dir_path / "output_dir"
                         / "compressed"
                         / (
                             "experiment3_Record Node 101#Neuropix-PXI-100"
@@ -679,7 +749,7 @@ class TestEphysJob(unittest.TestCase):
                 call(
                     format="zarr",
                     folder=(
-                        Path("output_dir")
+                        self.test_dir_path / "output_dir"
                         / "compressed"
                         / (
                             "experiment6_Record Node 101#Neuropix-PXI-100"
@@ -700,7 +770,7 @@ class TestEphysJob(unittest.TestCase):
                 call(
                     format="zarr",
                     folder=(
-                        Path("output_dir")
+                        self.test_dir_path / "output_dir"
                         / "compressed"
                         / (
                             "experiment6_Record Node 101#Neuropix-PXI-100"
@@ -757,7 +827,7 @@ class TestEphysJob(unittest.TestCase):
                 call(
                     format="zarr",
                     folder=(
-                        Path("output_dir")
+                        self.test_dir_path / "output_dir"
                         / "compressed"
                         / (
                             "experiment1_Record Node 101#NI-DAQmx-103"
@@ -778,7 +848,7 @@ class TestEphysJob(unittest.TestCase):
                 call(
                     format="zarr",
                     folder=(
-                        Path("output_dir")
+                        self.test_dir_path / "output_dir"
                         / "compressed"
                         / (
                             "experiment1_Record Node 101#Neuropix-PXI-100"
@@ -799,7 +869,7 @@ class TestEphysJob(unittest.TestCase):
                 call(
                     format="zarr",
                     folder=(
-                        Path("output_dir")
+                        self.test_dir_path / "output_dir"
                         / "compressed"
                         / (
                             "experiment1_Record Node 101#Neuropix-PXI-100"
@@ -820,7 +890,7 @@ class TestEphysJob(unittest.TestCase):
                 call(
                     format="zarr",
                     folder=(
-                        Path("output_dir")
+                        self.test_dir_path / "output_dir"
                         / "compressed"
                         / (
                             "experiment3_Record Node 101#NI-DAQmx-103"
@@ -841,7 +911,7 @@ class TestEphysJob(unittest.TestCase):
                 call(
                     format="zarr",
                     folder=(
-                        Path("output_dir")
+                        self.test_dir_path / "output_dir"
                         / "compressed"
                         / (
                             "experiment3_Record Node 101#Neuropix-PXI-100"
@@ -862,7 +932,7 @@ class TestEphysJob(unittest.TestCase):
                 call(
                     format="zarr",
                     folder=(
-                        Path("output_dir")
+                        self.test_dir_path / "output_dir"
                         / "compressed"
                         / (
                             "experiment3_Record Node 101#Neuropix-PXI-100"
@@ -883,7 +953,7 @@ class TestEphysJob(unittest.TestCase):
                 call(
                     format="zarr",
                     folder=(
-                        Path("output_dir")
+                        self.test_dir_path / "output_dir"
                         / "compressed"
                         / (
                             "experiment6_Record Node 101#NI-DAQmx-103"
@@ -904,7 +974,7 @@ class TestEphysJob(unittest.TestCase):
                 call(
                     format="zarr",
                     folder=(
-                        Path("output_dir")
+                        self.test_dir_path / "output_dir"
                         / "compressed"
                         / (
                             "experiment6_Record Node 101#Neuropix-PXI-100"
@@ -925,7 +995,7 @@ class TestEphysJob(unittest.TestCase):
                 call(
                     format="zarr",
                     folder=(
-                        Path("output_dir")
+                        self.test_dir_path / "output_dir"
                         / "compressed"
                         / (
                             "experiment6_Record Node 101#Neuropix-PXI-100"
@@ -1063,7 +1133,7 @@ class TestEphysJob(unittest.TestCase):
         )
         expected_clip_args_derived = {
             "stream_gen": 9,
-            "dst_dir": Path("output_dir") / "ecephys_clipped",
+            "dst_dir": self.test_dir_path / "output_dir" / "ecephys_clipped",
         }
         self.assertEqual(expected_clip_args_derived, actual_clip_args_derived)
 
@@ -1087,7 +1157,8 @@ class TestEphysJob(unittest.TestCase):
                 shaping_weight=0.0,
             ),
             "max_windows_filename_len": 150,
-            "output_dir": Path("output_dir") / "ecephys_compressed",
+            "output_dir":
+                self.test_dir_path / "output_dir" / "ecephys_compressed",
             "output_format": "zarr",
             "job_kwargs": {"n_jobs": 1},
         }
@@ -1266,9 +1337,11 @@ class TestCheckTimeAlignment(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         """Setup basic job settings and job that can be used across tests."""
+        cls.test_dir = tempfile.TemporaryDirectory()
+        cls.test_dir_path = Path(cls.test_dir.name)
         basic_job_settings_raise = EphysJobSettings(
             input_source=OE_DATA_DIR_NOT_ALIGNED,
-            output_directory=Path("output_dir_align"),
+            output_directory=cls.test_dir_path / "output_dir_align",
             compress_job_save_kwargs={"n_jobs": 1},
         )
         cls.basic_job_settings_raise = basic_job_settings_raise
@@ -1278,7 +1351,7 @@ class TestCheckTimeAlignment(unittest.TestCase):
 
         basic_job_settings_warn = EphysJobSettings(
             input_source=OE_DATA_DIR_NOT_ALIGNED,
-            output_directory=Path("output_dir_align"),
+            output_directory=cls.test_dir_path / "output_dir_align",
             compress_job_save_kwargs={"n_jobs": 1},
             check_timestamps=False,
         )
@@ -1289,7 +1362,7 @@ class TestCheckTimeAlignment(unittest.TestCase):
 
         basic_job_settings_v110_sync = EphysJobSettings(
             input_source=OE_DATA_DIR_V110_SYNC,
-            output_directory=Path("output_dir_align_v110"),
+            output_directory=cls.test_dir_path / "output_dir_align_v110",
             compress_job_save_kwargs={"n_jobs": 1},
         )
         cls.basic_job_settings_v110_sync = basic_job_settings_v110_sync
@@ -1299,13 +1372,20 @@ class TestCheckTimeAlignment(unittest.TestCase):
 
         basic_job_settings_v110_not_sync = EphysJobSettings(
             input_source=OE_DATA_DIR_V110_NO_SYNC,
-            output_directory=Path("output_dir_align_v110_no_sync"),
+            output_directory=(
+                cls.test_dir_path / "output_dir_align_v110_no_sync"
+            ),
             compress_job_save_kwargs={"n_jobs": 1},
         )
         cls.basic_job_settings_v110_not_sync = basic_job_settings_v110_not_sync
         cls.basic_job_v110_not_sync = EphysCompressionJob(
             job_settings=basic_job_settings_v110_not_sync
         )
+
+    @classmethod
+    def tearDownClass(cls):
+        """Remove output directories created during tests"""
+        cls.test_dir.cleanup()
 
     def test_check_alignment(self):
         """Tests check_time_alignment returns False"""
@@ -1363,9 +1443,11 @@ class TestChronicCompressJob(unittest.TestCase):
     @classmethod
     def setUpClass(cls):
         """Setup basic job settings and job that can be used across tests"""
+        cls.test_dir = tempfile.TemporaryDirectory()
+        cls.test_dir_path = Path(cls.test_dir.name)
         chronic_job_settings = EphysJobSettings(
             input_source=CHRONIC_DATA_DIR,
-            output_directory=Path("output_dir_chronic"),
+            output_directory=cls.test_dir_path / "output_dir_chronic",
             compress_job_save_kwargs={"n_jobs": 1},
             reader_name="chronic",
             chronic_start_flag=True,
@@ -1377,7 +1459,7 @@ class TestChronicCompressJob(unittest.TestCase):
 
         chronic_job_settings_append1 = EphysJobSettings(
             input_source=CHRONIC_DATA_DIR,
-            output_directory=Path("output_dir_chronic_append"),
+            output_directory=cls.test_dir_path / "output_dir_chronic_append",
             compress_job_save_kwargs={"n_jobs": 1},
             chronic_chunks_to_compress=["2025-05-13T19-00-00"],
             chronic_use_sample_metadata=False,
@@ -1391,7 +1473,7 @@ class TestChronicCompressJob(unittest.TestCase):
 
         chronic_job_settings_append2 = EphysJobSettings(
             input_source=CHRONIC_DATA_DIR,
-            output_directory=Path("output_dir_chronic_append"),
+            output_directory=cls.test_dir_path / "output_dir_chronic_append",
             compress_job_save_kwargs={"n_jobs": 1},
             chronic_chunks_to_compress=[
                 "2025-05-13T20-00-00",
@@ -1407,7 +1489,7 @@ class TestChronicCompressJob(unittest.TestCase):
 
         chronic_job_settings_ns = EphysJobSettings(
             input_source=CHRONIC_DATA_DIR,
-            output_directory=Path("output_dir_chronic_ns"),
+            output_directory=cls.test_dir_path / "output_dir_chronic_ns",
             compress_job_save_kwargs={"n_jobs": 1},
             chronic_chunks_to_compress=[
                 "2025-05-13T19-00-00",
@@ -1422,7 +1504,7 @@ class TestChronicCompressJob(unittest.TestCase):
 
         chronic_job_settings_filter = EphysJobSettings(
             input_source=CHRONIC_DATA_DIR,
-            output_directory=Path("output_dir_chronic_filter"),
+            output_directory=cls.test_dir_path / "output_dir_chronic_filter",
             compress_job_save_kwargs={"n_jobs": 1},
             reader_name="chronic",
             chronic_chunks_to_compress=["2025-05-13T19-00-00"],
@@ -1434,7 +1516,7 @@ class TestChronicCompressJob(unittest.TestCase):
 
         chronic_job_settings_no_match = EphysJobSettings(
             input_source=CHRONIC_DATA_DIR,
-            output_directory=Path("output_dir_chronic_no_match"),
+            output_directory=cls.test_dir_path / "output_dir_chronic_no_match",
             compress_job_save_kwargs={"n_jobs": 1},
             reader_name="chronic",
             chronic_chunks_to_compress=["2024-05-13T19-00-00"],
@@ -1446,7 +1528,9 @@ class TestChronicCompressJob(unittest.TestCase):
 
         chronic_job_settings_multi_match = EphysJobSettings(
             input_source=CHRONIC_DATA_DIR,
-            output_directory=Path("output_dir_chronic_multi_match"),
+            output_directory=(
+                cls.test_dir_path / "output_dir_chronic_multi_match"
+            ),
             compress_job_save_kwargs={"n_jobs": 1},
             reader_name="chronic",
             chronic_chunks_to_compress=["2025-05-13"],
@@ -1458,7 +1542,9 @@ class TestChronicCompressJob(unittest.TestCase):
 
         chronic_job_settings_sampledata = EphysJobSettings(
             input_source=CHRONIC_DATA_DIR,
-            output_directory=Path("output_dir_chronic"),
+            output_directory=(
+                cls.test_dir_path / "output_dir_chronic_sampledata"
+            ),
             compress_job_save_kwargs={"n_jobs": 1},
             reader_name="chronic",
             chronic_start_flag=False,
@@ -1474,19 +1560,7 @@ class TestChronicCompressJob(unittest.TestCase):
     @classmethod
     def tearDownClass(cls):
         """Remove output directories created during tests"""
-        for job in [
-            cls.chronic_job,
-            cls.chronic_job_append1,
-            cls.chronic_job_append2,
-            cls.chronic_job_ns,
-            cls.chronic_job_filter,
-            cls.chronic_job_no_match,
-            cls.chronic_job_multi_match,
-            cls.chronic_job_settings_sampledata,
-        ]:
-            output_dir = job.job_settings.output_directory
-            if Path(output_dir).exists():
-                shutil.rmtree(output_dir)
+        cls.test_dir.cleanup()
 
     def test_get_read_blocks(self):
         """Tests _get_read_blocks method"""
@@ -1609,8 +1683,9 @@ class TestChronicCompressJob(unittest.TestCase):
         mock_copy: MagicMock,
     ):
         """Tests _copy_and_clip_data method"""
+        dst_dir = self.test_dir_path / "chronic_copy_and_clip"
         self.chronic_job._copy_and_clip_data(
-            dst_dir=Path("."), stream_gen=iter([])
+            dst_dir=dst_dir, stream_gen=iter([])
         )
         all_files_to_copy = [
             p
@@ -1620,7 +1695,7 @@ class TestChronicCompressJob(unittest.TestCase):
         expected_copy_calls = [
             call(
                 p,
-                Path(".")
+                dst_dir
                 / p.relative_to(self.chronic_job.job_settings.input_source),
             )
             for p in all_files_to_copy
