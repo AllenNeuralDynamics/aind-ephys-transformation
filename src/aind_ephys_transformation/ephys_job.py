@@ -734,7 +734,7 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
                         if all_synced:
                             return True
                         else:
-                            self._check_openephys_timestamps()
+                            return self._check_openephys_timestamps()
             else:
                 # OE version < 1.1.0-preview -> timestamps may not be aligned
                 return self._check_openephys_timestamps()
