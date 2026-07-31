@@ -298,6 +298,13 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
             probe_group = pi.read_probeinterface(probe_json)
             with open(binary_info_json) as f:
                 binary_info = json.load(f)
+            # Re-sort channel names according to valid device_channel_indices
+            probe = probe_group.probes[0]
+            device_channel_indices = probe.device_channel_indices
+            valid_mask = device_channel_indices > -1
+            valid_channel_indices = device_channel_indices[valid_mask]
+            channel_names = np.array(binary_info["channel_ids"])
+            binary_info["channel_ids"] = channel_names[valid_channel_indices]
             adc_depth = binary_info.pop("adc_depth")
 
             recording_list = []
