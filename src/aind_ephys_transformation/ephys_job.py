@@ -477,63 +477,69 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
                 }
             )
         elif self.job_settings.reader_name == ReaderName.OPENEPHYS:
-            nblocks = se.get_neo_num_blocks(
-                self.job_settings.reader_name.value,
-                self.job_settings.input_source,
-            )
-            stream_names, _ = se.get_neo_streams(
-                self.job_settings.reader_name.value,
-                self.job_settings.input_source,
-            )
-            # load first stream to map block_indices to experiment_names
-            rec_test = se.read_openephys(
-                self.job_settings.input_source,
-                block_index=0,
-                stream_name=stream_names[0],
-            )
-            record_node = list(rec_test.neo_reader.folder_structure.keys())[0]
-            experiments = rec_test.neo_reader.folder_structure[record_node][
-                "experiments"
-            ]
-            exp_ids = list(experiments.keys())
-            experiment_names = [
-                experiments[exp_id]["name"] for exp_id in sorted(exp_ids)
-            ]
-            for block_index in range(nblocks):
-                for stream_name in stream_names:
-                    rec = se.read_openephys(
-                        self.job_settings.input_source,
-                        stream_name=stream_name,
-                        block_index=block_index,
-                        load_sync_timestamps=True,
-                    )
-                    # Look for empty segments and select only
-                    # non-empty segments.
-                    non_empty_segment_indices = []
-                    for segment_index in range(rec.get_num_segments()):
-                        if rec.get_num_samples(segment_index) > 0:
-                            non_empty_segment_indices.append(segment_index)
-                    if len(non_empty_segment_indices) == 0:
-                        # Empty stream: skip this stream entirely
-                        continue  # pragma: no cover
-                    elif (
-                        len(non_empty_segment_indices) < rec.get_num_segments()
-                    ):  # pragma: no cover
-                        # Some segments are empty: select only
-                        # non-empty segments
-                        logging.warning(
-                            f"Block {block_index}, stream {stream_name} "
-                            f"has empty segments. Selecting only "
-                            f"non-empty segments: {non_empty_segment_indices}"
+            experiment_sets = self._get_openephys_consistent_experiments()
+            for experiment_set in experiment_sets:
+                nblocks = se.get_neo_num_blocks(
+                    self.job_settings.reader_name.value,
+                    self.job_settings.input_source,
+                    experiment_names=experiment_set
+                )
+                stream_names, _ = se.get_neo_streams(
+                    self.job_settings.reader_name.value,
+                    self.job_settings.input_source,
+                    experiment_names=experiment_set
+                )
+                # load first stream to map block_indices to experiment_names
+                rec_test = se.read_openephys(
+                    self.job_settings.input_source,
+                    block_index=0,
+                    stream_name=stream_names[0],
+                    experiment_names=experiment_set
+                )
+                record_node = list(rec_test.neo_reader.folder_structure.keys())[0]
+                experiments = rec_test.neo_reader.folder_structure[record_node][
+                    "experiments"
+                ]
+                exp_ids = list(experiments.keys())
+                experiment_names = [
+                    experiments[exp_id]["name"] for exp_id in sorted(exp_ids)
+                ]
+                for block_index in range(nblocks):
+                    for stream_name in stream_names:
+                        rec = se.read_openephys(
+                            self.job_settings.input_source,
+                            stream_name=stream_name,
+                            block_index=block_index,
+                            load_sync_timestamps=True,
+                            experiment_names=experiment_set,
                         )
-                        rec = rec.select_segments(non_empty_segment_indices)
-                    yield (
-                        {
-                            "recording": rec,
-                            "experiment_name": experiment_names[block_index],
-                            "stream_name": stream_name,
-                        }
-                    )
+                        # Look for empty segments and select only
+                        # non-empty segments.
+                        non_empty_segment_indices = []
+                        for segment_index in range(rec.get_num_segments()):
+                            if rec.get_num_samples(segment_index) > 0:
+                                non_empty_segment_indices.append(segment_index)
+                        if len(non_empty_segment_indices) == 0:
+                            # Empty stream: skip this stream entirely
+                            continue  # pragma: no cover
+                        elif (
+                            len(non_empty_segment_indices) < rec.get_num_segments()
+                        ):  # pragma: no cover
+                            # Some segments are empty: select only
+                            # non-empty segments
+                            logging.warning(
+                                f"Block {block_index}, stream {stream_name} "
+                                f"has empty segments. Selecting only "
+                                f"non-empty segments: {non_empty_segment_indices}"
+                            )
+                            rec = rec.select_segments(non_empty_segment_indices)
+                        yield (
+                            {
+                                "recording": rec,
+                                "experiment_name": experiment_names[block_index],
+                                "stream_name": stream_name,
+                            }
+                        )
 
     def _get_streams_to_clip(self) -> Iterator[dict]:
         """
@@ -550,40 +556,87 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
             # return an empty iterator
             return iter([])
         else:
-            stream_names, _ = se.get_neo_streams(
-                self.job_settings.reader_name.value,
-                self.job_settings.input_source,
-            )
-            for dat_file in self.job_settings.input_source.glob("**/*.dat"):
-                oe_stream_name = dat_file.parent.name
-                si_stream_name = [
-                    stream_name
-                    for stream_name in stream_names
-                    if oe_stream_name in stream_name
-                ][0]
-                n_chan = se.read_openephys(
+            experiment_sets = self._get_openephys_consistent_experiments()
+            for experiment_set in experiment_sets:
+                stream_names, _ = se.get_neo_streams(
+                    self.job_settings.reader_name.value,
                     self.job_settings.input_source,
-                    block_index=0,
-                    stream_name=si_stream_name,
-                ).get_num_channels()
+                    experiment_names=experiment_set
+                )
+                for dat_file in self.job_settings.input_source.glob("**/*.dat"):
+                    oe_stream_name = dat_file.parent.name
+                    si_stream_name = [
+                        stream_name
+                        for stream_name in stream_names
+                        if oe_stream_name in stream_name
+                    ][0]
+                    n_chan = se.read_openephys(
+                        self.job_settings.input_source,
+                        block_index=0,
+                        stream_name=si_stream_name,
+                        experiment_names=experiment_set
+                    ).get_num_channels()
 
-                if dat_file.stat().st_size == 0:  # pragma: no cover
-                    data = np.array([], dtype="int16")
-                else:
-                    data = np.memmap(
-                        filename=str(dat_file),
-                        dtype="int16",
-                        order="C",
-                        mode="r",
-                    ).reshape(-1, n_chan)
+                    if dat_file.stat().st_size == 0:  # pragma: no cover
+                        data = np.array([], dtype="int16")
+                    else:
+                        data = np.memmap(
+                            filename=str(dat_file),
+                            dtype="int16",
+                            order="C",
+                            mode="r",
+                        ).reshape(-1, n_chan)
 
-                yield {
-                    "data": data,
-                    "relative_path_name": str(
-                        dat_file.relative_to(self.job_settings.input_source)
-                    ),
-                    "n_chan": n_chan,
-                }
+                    yield {
+                        "data": data,
+                        "relative_path_name": str(
+                            dat_file.relative_to(self.job_settings.input_source)
+                        ),
+                        "n_chan": n_chan,
+                    }
+
+    def _get_openephys_consistent_experiments(self) -> list[list[str]]:
+        """
+        Get a list of Open Ephys experiments with consistent streams.
+
+        Returns
+        -------
+        list[list[str]]
+            A list of one or two lists, where each inner list contains the names 
+            of experiments that are consistent within an experiment.
+        """
+        oe_folder = self.job_settings.input_source
+        experiment_names = [p.name for p in oe_folder.glob("**/experiment*/")]
+        experiment_names.sort(key=lambda p: int(p.replace("experiment", "")))
+        
+        not_found_consistent = True
+        first_experiment_set = list(experiment_names)
+        second_experiment_set = []
+        while not_found_consistent:
+            if len(first_experiment_set) == 0:
+                break
+            try:
+                _ = se.get_neo_num_blocks(
+                    "openephysbinary",
+                    oe_folder,
+                    experiment_names=first_experiment_set
+                )
+                if len(second_experiment_set) > 0:
+                    _ = se.get_neo_num_blocks(
+                        "openephysbinary",
+                        oe_folder,
+                        experiment_names=second_experiment_set
+                    )
+                not_found_consistent = False
+            except:
+                second_experiment_set.append(first_experiment_set[-1])
+                first_experiment_set = first_experiment_set[:-1]
+
+        if len(second_experiment_set) > 0:
+            second_experiment_set = second_experiment_set[::-1]
+            return [first_experiment_set, second_experiment_set]
+        else:
+            return first_experiment_set
 
     def _are_sample_metadata_files_valid(self, onix_folder: Path) -> bool:
         """
