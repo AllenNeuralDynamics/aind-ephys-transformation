@@ -496,10 +496,12 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
                     stream_name=stream_names[0],
                     experiment_names=experiment_set
                 )
-                record_node = list(rec_test.neo_reader.folder_structure.keys())[0]
-                experiments = rec_test.neo_reader.folder_structure[record_node][
-                    "experiments"
-                ]
+                record_node = list(
+                    rec_test.neo_reader.folder_structure.keys()
+                )[0]
+                experiments = rec_test.neo_reader.folder_structure[
+                    record_node
+                ]["experiments"]
                 exp_ids = list(experiments.keys())
                 experiment_names = [
                     experiments[exp_id]["name"] for exp_id in sorted(exp_ids)
@@ -522,21 +524,27 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
                         if len(non_empty_segment_indices) == 0:
                             # Empty stream: skip this stream entirely
                             continue  # pragma: no cover
-                        elif (
-                            len(non_empty_segment_indices) < rec.get_num_segments()
-                        ):  # pragma: no cover
+                        elif (  # pragma: no cover
+                            len(non_empty_segment_indices)
+                            < rec.get_num_segments()
+                        ):
                             # Some segments are empty: select only
                             # non-empty segments
                             logging.warning(
                                 f"Block {block_index}, stream {stream_name} "
                                 f"has empty segments. Selecting only "
-                                f"non-empty segments: {non_empty_segment_indices}"
+                                "non-empty segments: "
+                                f"{non_empty_segment_indices}"
                             )
-                            rec = rec.select_segments(non_empty_segment_indices)
+                            rec = rec.select_segments(
+                                non_empty_segment_indices
+                            )
                         yield (
                             {
                                 "recording": rec,
-                                "experiment_name": experiment_names[block_index],
+                                "experiment_name": experiment_names[
+                                    block_index
+                                ],
                                 "stream_name": stream_name,
                             }
                         )
@@ -563,7 +571,9 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
                     self.job_settings.input_source,
                     experiment_names=experiment_set
                 )
-                for dat_file in self.job_settings.input_source.glob("**/*.dat"):
+                for dat_file in self.job_settings.input_source.glob(
+                    "**/*.dat"
+                ):
                     oe_stream_name = dat_file.parent.name
                     si_stream_name = [
                         stream_name
@@ -590,7 +600,9 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
                     yield {
                         "data": data,
                         "relative_path_name": str(
-                            dat_file.relative_to(self.job_settings.input_source)
+                            dat_file.relative_to(
+                                self.job_settings.input_source
+                            )
                         ),
                         "n_chan": n_chan,
                     }
@@ -602,13 +614,13 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
         Returns
         -------
         list[list[str]]
-            A list of one or two lists, where each inner list contains the names 
-            of experiments that are consistent within an experiment.
+            A list of one or two lists, where each inner list contains
+            the names of experiments that are consistent within an experiment.
         """
         oe_folder = self.job_settings.input_source
         experiment_names = [p.name for p in oe_folder.glob("**/experiment*/")]
         experiment_names.sort(key=lambda p: int(p.replace("experiment", "")))
-        
+
         not_found_consistent = True
         first_experiment_set = list(experiment_names)
         second_experiment_set = []
@@ -628,7 +640,7 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
                         experiment_names=second_experiment_set
                     )
                 not_found_consistent = False
-            except:
+            except Exception:
                 second_experiment_set.append(first_experiment_set[-1])
                 first_experiment_set = first_experiment_set[:-1]
 
