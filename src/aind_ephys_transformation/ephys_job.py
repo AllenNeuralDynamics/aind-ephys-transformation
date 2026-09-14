@@ -648,7 +648,7 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
             second_experiment_set = second_experiment_set[::-1]
             return [first_experiment_set, second_experiment_set]
         else:
-            return first_experiment_set
+            return [first_experiment_set]
 
     def _are_sample_metadata_files_valid(self, onix_folder: Path) -> bool:
         """
