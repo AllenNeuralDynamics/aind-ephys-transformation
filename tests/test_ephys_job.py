@@ -455,22 +455,6 @@ class TestEphysJob(unittest.TestCase):
                     stream_name=stream_name
                 )
 
-    def test_consistent_experiments(self):
-        """Tests _get_streams_to_clip with inconsistent streams"""
-        consistent_experiments = (
-            self.job_inc._get_openephys_consistent_experiments()
-        )
-        self.assertEqual(len(consistent_experiments), 2)
-        self.assertNotEqual(
-            consistent_experiments[0],
-            consistent_experiments[1]
-        )
-        expected_experiments = [
-            ["experiment1", "experiment3"],
-            ["experiment6"]
-        ]
-        self.assertEqual(consistent_experiments, expected_experiments)
-
     def test_get_streams_inconsistent_experiments(self):
         """Tests _get_streams_to_clip with inconsistent experiments"""
         streams_to_clip = list(self.job_inc._get_streams_to_clip())
