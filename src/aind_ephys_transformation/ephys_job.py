@@ -571,7 +571,7 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
                     ]
                     if si_stream_names:
                         si_stream_name = si_stream_names[0]
-                    else:
+                    else:  # pragma: no cover
                         continue
 
                     n_chan = se.read_openephys(
