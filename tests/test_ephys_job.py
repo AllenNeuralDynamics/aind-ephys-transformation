@@ -30,6 +30,7 @@ from aind_ephys_transformation.models import CompressorName
 TEST_DIR = Path(os.path.dirname(os.path.realpath(__file__))) / "resources"
 OE_DATA_DIR = TEST_DIR / "v0.6.x_neuropixels_multiexp_multistream"
 OE_DATA_DIR_EMPTY = TEST_DIR / "v0.6.x_neuropixels_multiexp_empty_streams"
+OE_DATA_DIR_INC = TEST_DIR / "v0.6.x_neuropixels_multiexp_inconsistent"
 OE_DATA_DIR_NOT_ALIGNED = TEST_DIR / "v0.6.x_neuropixels_not_aligned"
 OE_DATA_DIR_V110_SYNC = TEST_DIR / "v1.1.0_neuropixels_aligned"
 OE_DATA_DIR_V110_NO_SYNC = TEST_DIR / "v1.1.0_neuropixels_not_aligned"
@@ -61,6 +62,15 @@ class TestEphysJob(unittest.TestCase):
         cls.job_empty = EphysCompressionJob(job_settings=job_settings_empty)
         # experiment1/recording1/ProbeB and experiment6/recording1/ProbeC
         cls.NUM_EMPTY_STREAMS = 2
+
+        job_settings_inc = EphysJobSettings(
+            input_source=OE_DATA_DIR_INC,
+            output_directory=cls.test_dir_path / "output_dir_inc",
+            compress_job_save_kwargs={"n_jobs": 1},
+        )
+        cls.job_settings_inc = job_settings_inc
+        cls.job_inc = EphysCompressionJob(job_settings=job_settings_inc)
+        # probeC was removed from the inconsistent dataset
 
     @classmethod
     def tearDownClass(cls):
@@ -444,6 +454,42 @@ class TestEphysJob(unittest.TestCase):
                     block_index=block_index,
                     stream_name=stream_name
                 )
+
+    def test_consistent_experiments(self):
+        """Tests _get_streams_to_clip with inconsistent streams"""
+        consistent_experiments = (
+            self.job_inc._get_openephys_consistent_experiments()
+        )
+        self.assertEqual(len(consistent_experiments), 2)
+        self.assertNotEqual(
+            consistent_experiments[0],
+            consistent_experiments[1]
+        )
+        expected_experiments = [
+            ["experiment1", "experiment3"],
+            ["experiment6"]
+        ]
+        self.assertEqual(consistent_experiments, expected_experiments)
+
+    def test_get_streams_inconsistent_experiments(self):
+        """Tests _get_streams_to_clip with inconsistent experiments"""
+        streams_to_clip = list(self.job_inc._get_streams_to_clip())
+
+        # experiments 1/3: ProbeA/B + NIDQ -> 6 streams
+        # experiment6: ProbeA + NIDQ  2 streams
+        self.assertEqual(len(streams_to_clip), 8)
+
+        # Count number of experiments in the streams to clip
+        experiment_counts = {}
+        for stream in streams_to_clip:
+            experiment_name = stream["relative_path_name"].split("/")[1]
+            if experiment_name not in experiment_counts:
+                experiment_counts[experiment_name] = 0
+            experiment_counts[experiment_name] += 1
+
+        self.assertEqual(experiment_counts["experiment1"], 3)
+        self.assertEqual(experiment_counts["experiment3"], 3)
+        self.assertEqual(experiment_counts["experiment6"], 2)
 
     @patch("shutil.copytree")
     @patch("shutil.ignore_patterns")

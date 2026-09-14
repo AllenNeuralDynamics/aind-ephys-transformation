@@ -574,12 +574,21 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
                 for dat_file in self.job_settings.input_source.glob(
                     "**/*.dat"
                 ):
+                    if not any(
+                        exp in dat_file.parts for exp in experiment_set
+                    ):
+                        continue
                     oe_stream_name = dat_file.parent.name
-                    si_stream_name = [
+                    si_stream_names = [
                         stream_name
                         for stream_name in stream_names
                         if oe_stream_name in stream_name
-                    ][0]
+                    ]
+                    if si_stream_names:
+                        si_stream_name = si_stream_names[0]
+                    else:
+                        continue
+
                     n_chan = se.read_openephys(
                         self.job_settings.input_source,
                         block_index=0,
