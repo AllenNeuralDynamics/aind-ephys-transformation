@@ -477,35 +477,26 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
                 }
             )
         elif self.job_settings.reader_name == ReaderName.OPENEPHYS:
-            nblocks = se.get_neo_num_blocks(
-                self.job_settings.reader_name.value,
-                self.job_settings.input_source,
-            )
-            stream_names, _ = se.get_neo_streams(
-                self.job_settings.reader_name.value,
-                self.job_settings.input_source,
-            )
-            # load first stream to map block_indices to experiment_names
-            rec_test = se.read_openephys(
-                self.job_settings.input_source,
-                block_index=0,
-                stream_name=stream_names[0],
-            )
-            record_node = list(rec_test.neo_reader.folder_structure.keys())[0]
-            experiments = rec_test.neo_reader.folder_structure[record_node][
-                "experiments"
-            ]
-            exp_ids = list(experiments.keys())
+            oe_folder = self.job_settings.input_source
             experiment_names = [
-                experiments[exp_id]["name"] for exp_id in sorted(exp_ids)
+                p.name for p in oe_folder.glob("**/experiment*/")
             ]
-            for block_index in range(nblocks):
+            experiment_names.sort(
+                key=lambda p: int(p.replace("experiment", ""))
+            )
+            # Load experiments 1 by 1 to avoid inconsistent streams
+            for experiment_name in experiment_names:
+                stream_names, _ = se.get_neo_streams(
+                    self.job_settings.reader_name.value,
+                    self.job_settings.input_source,
+                    experiment_names=[experiment_name]
+                )
                 for stream_name in stream_names:
                     rec = se.read_openephys(
                         self.job_settings.input_source,
                         stream_name=stream_name,
-                        block_index=block_index,
                         load_sync_timestamps=True,
+                        experiment_name=experiment_name,
                     )
                     # Look for empty segments and select only
                     # non-empty segments.
@@ -516,21 +507,25 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
                     if len(non_empty_segment_indices) == 0:
                         # Empty stream: skip this stream entirely
                         continue  # pragma: no cover
-                    elif (
-                        len(non_empty_segment_indices) < rec.get_num_segments()
-                    ):  # pragma: no cover
+                    elif (  # pragma: no cover
+                        len(non_empty_segment_indices)
+                        < rec.get_num_segments()
+                    ):
                         # Some segments are empty: select only
                         # non-empty segments
                         logging.warning(
-                            f"Block {block_index}, stream {stream_name} "
-                            f"has empty segments. Selecting only "
-                            f"non-empty segments: {non_empty_segment_indices}"
+                            f"Experiment {experiment_name}, stream "
+                            f"{stream_name} has empty segments. Selecting "
+                            f"only non-empty segments: "
+                            f"{non_empty_segment_indices}"
                         )
-                        rec = rec.select_segments(non_empty_segment_indices)
+                        rec = rec.select_segments(
+                            non_empty_segment_indices
+                        )
                     yield (
                         {
                             "recording": rec,
-                            "experiment_name": experiment_names[block_index],
+                            "experiment_name": experiment_name,
                             "stream_name": stream_name,
                         }
                     )
@@ -550,40 +545,60 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
             # return an empty iterator
             return iter([])
         else:
-            stream_names, _ = se.get_neo_streams(
-                self.job_settings.reader_name.value,
-                self.job_settings.input_source,
+            oe_folder = self.job_settings.input_source
+            experiment_names = [
+                p.name for p in oe_folder.glob("**/experiment*/")
+            ]
+            experiment_names.sort(
+                key=lambda p: int(p.replace("experiment", ""))
             )
-            for dat_file in self.job_settings.input_source.glob("**/*.dat"):
-                oe_stream_name = dat_file.parent.name
-                si_stream_name = [
-                    stream_name
-                    for stream_name in stream_names
-                    if oe_stream_name in stream_name
-                ][0]
-                n_chan = se.read_openephys(
+            for experiment_name in experiment_names:
+                stream_names, _ = se.get_neo_streams(
+                    self.job_settings.reader_name.value,
                     self.job_settings.input_source,
-                    block_index=0,
-                    stream_name=si_stream_name,
-                ).get_num_channels()
+                    experiment_names=[experiment_name]
+                )
+                for dat_file in self.job_settings.input_source.glob(
+                    "**/*.dat"
+                ):
+                    if experiment_name not in dat_file.parts:
+                        continue
+                    oe_stream_name = dat_file.parent.name
+                    si_stream_names = [
+                        stream_name
+                        for stream_name in stream_names
+                        if oe_stream_name in stream_name
+                    ]
+                    if si_stream_names:
+                        si_stream_name = si_stream_names[0]
+                    else:  # pragma: no cover
+                        continue
 
-                if dat_file.stat().st_size == 0:  # pragma: no cover
-                    data = np.array([], dtype="int16")
-                else:
-                    data = np.memmap(
-                        filename=str(dat_file),
-                        dtype="int16",
-                        order="C",
-                        mode="r",
-                    ).reshape(-1, n_chan)
+                    n_chan = se.read_openephys(
+                        self.job_settings.input_source,
+                        stream_name=si_stream_name,
+                        experiment_name=experiment_name
+                    ).get_num_channels()
 
-                yield {
-                    "data": data,
-                    "relative_path_name": str(
-                        dat_file.relative_to(self.job_settings.input_source)
-                    ),
-                    "n_chan": n_chan,
-                }
+                    if dat_file.stat().st_size == 0:  # pragma: no cover
+                        data = np.array([], dtype="int16")
+                    else:
+                        data = np.memmap(
+                            filename=str(dat_file),
+                            dtype="int16",
+                            order="C",
+                            mode="r",
+                        ).reshape(-1, n_chan)
+
+                    yield {
+                        "data": data,
+                        "relative_path_name": str(
+                            dat_file.relative_to(
+                                self.job_settings.input_source
+                            )
+                        ),
+                        "n_chan": n_chan,
+                    }
 
     def _are_sample_metadata_files_valid(self, onix_folder: Path) -> bool:
         """
@@ -802,12 +817,12 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
     ):
         """
         Scales read_blocks. A single read_block is dict with keys:
-        ('recording', 'block_index', 'stream_name')
+        ('recording', 'experiment_name', 'stream_name')
         Parameters
         ----------
         read_blocks : Iterator[dict]
           A single read_block is dict with keys:
-          ('recording', 'block_index', 'stream_name')
+          ('recording', 'experiment_name', 'stream_name')
         random_seed : Optional[int]
           Optional seed for correct_lsb method. Default is None.
         num_chunks_per_segment : int
@@ -819,7 +834,7 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
         -------
         Iterator[dict]
           An iterator over read_blocks. A single read_block is dict with keys:
-          ('scale_recording', 'block_index', 'stream_name')
+          ('scale_recording', 'experiment_name', 'stream_name')
         """
         for read_block in read_blocks:
             # We don't need to scale the NI-DAQ recordings
@@ -1051,6 +1066,9 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
                     **job_kwargs,
                 )
             else:
+                logging.info(
+                    f"Saving recording to: {zarr_path}"
+                )
                 _ = rec.save(
                     format=output_format,
                     folder=zarr_path,
