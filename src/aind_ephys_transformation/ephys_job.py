@@ -1066,6 +1066,9 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
                     **job_kwargs,
                 )
             else:
+                logging.info(
+                    f"Saving recording to: {zarr_path}"
+                )
                 _ = rec.save(
                     format=output_format,
                     folder=zarr_path,
