@@ -477,13 +477,7 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
                 }
             )
         elif self.job_settings.reader_name == ReaderName.OPENEPHYS:
-            oe_folder = self.job_settings.input_source
-            experiment_names = [
-                p.name for p in oe_folder.glob("**/experiment*/")
-            ]
-            experiment_names.sort(
-                key=lambda p: int(p.replace("experiment", ""))
-            )
+            experiment_names = self._get_experiment_names()
             # Load experiments 1 by 1 to avoid inconsistent streams
             for experiment_name in experiment_names:
                 stream_names, _ = se.get_neo_streams(
@@ -545,13 +539,7 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
             # return an empty iterator
             return iter([])
         else:
-            oe_folder = self.job_settings.input_source
-            experiment_names = [
-                p.name for p in oe_folder.glob("**/experiment*/")
-            ]
-            experiment_names.sort(
-                key=lambda p: int(p.replace("experiment", ""))
-            )
+            experiment_names = self._get_experiment_names()
             for experiment_name in experiment_names:
                 stream_names, _ = se.get_neo_streams(
                     self.job_settings.reader_name.value,
@@ -807,6 +795,25 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
                 f"Unknown compressor. Please select one of "
                 f"{[c for c in CompressorName]}"
             )
+
+    def _get_experiment_names(self) -> list[str]:
+        """
+        Retrieves the list of experiment names from the input source.
+        Returns
+        -------
+        list[str]
+          A list of experiment names.
+        """
+        openephys_folder = self.job_settings.input_source
+        experiment_names = [
+            p.name for p in openephys_folder.glob("**/experiment*/")
+        ]
+        # For multiple record nodes, the experiment names are duplicated
+        experiment_names = list(set(experiment_names))
+        experiment_names.sort(
+            key=lambda p: int(p.replace("experiment", ""))
+        )
+        return experiment_names
 
     def _scale_read_blocks(
         self,
