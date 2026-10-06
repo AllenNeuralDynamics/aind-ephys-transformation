@@ -110,12 +110,11 @@ def add_or_append_recording_to_zarr_group(  # noqa: C901
     )
 
     # save probe
-    if "contact_vector" not in zarr_group:
-        if recording.get_property("contact_vector") is not None:
-            probegroup = recording.get_probegroup()
-            zarr_group.attrs["probe"] = check_json(
-                probegroup.to_dict(array_as_list=True)
-            )
+    if recording.has_probe():
+        probegroup = recording.get_probegroup()
+        zarr_group.attrs["probegroup"] = check_json(
+            probegroup.to_dict(array_as_list=True)
+        )
 
     # save time vector if any
     t_starts = np.zeros(recording.get_num_segments(), dtype="float64") * np.nan
@@ -189,7 +188,7 @@ def add_or_append_traces_to_zarr(
     from spikeinterface.core.job_tools import (
         ensure_chunk_size,
         fix_job_kwargs,
-        ChunkRecordingExecutor,
+        TimeSeriesChunkExecutor,
     )
 
     assert dataset_paths is not None, "Provide 'file_path'"
@@ -251,7 +250,7 @@ def add_or_append_traces_to_zarr(
         dtype,
         global_start_frame,
     )
-    executor = ChunkRecordingExecutor(
+    executor = TimeSeriesChunkExecutor(
         recording,
         func,
         init_func,
@@ -260,13 +259,13 @@ def add_or_append_traces_to_zarr(
         job_name="write_zarr_recording",
         **job_kwargs,
     )
-    recording_slices = get_recording_slices_aligned_to_zarr_chunks(
+    slices = get_slices_aligned_to_zarr_chunks(
         recording, chunk_size, global_start_frame
     )
-    executor.run(recording_slices=recording_slices)
+    executor.run(slices=slices)
 
 
-def get_recording_slices_aligned_to_zarr_chunks(
+def get_slices_aligned_to_zarr_chunks(
     recording: BaseRecording, chunk_size: int, global_start_frame: int = 0
 ):
     """
@@ -288,7 +287,7 @@ def get_recording_slices_aligned_to_zarr_chunks(
 
     Returns
     -------
-    recording_slices : list of tuples
+    slices : list of tuples
         A list of tuples where each tuple represents a segment of the recording
         aligned to Zarr chunks.
     """
@@ -296,10 +295,10 @@ def get_recording_slices_aligned_to_zarr_chunks(
 
     segment_index = 0
     first_chunk_size = chunk_size - global_start_frame % chunk_size
-    recording_slices = [(segment_index, 0, first_chunk_size)]
+    slices = [(segment_index, 0, first_chunk_size)]
     num_frames = recording.get_num_samples(segment_index) - first_chunk_size
     chunks = divide_segment_into_chunks(num_frames, chunk_size)
-    recording_slices.extend(
+    slices.extend(
         [
             (
                 segment_index,
@@ -309,10 +308,10 @@ def get_recording_slices_aligned_to_zarr_chunks(
             for frame_start, frame_stop in chunks
         ]
     )
-    return recording_slices
+    return slices
 
 
-# used by write_zarr_recording + ChunkRecordingExecutor
+# used by write_zarr_recording + TimeSeriesChunkExecutor
 def _init_zarr_worker_append(
     recording,
     zarr_datasets,
@@ -333,7 +332,7 @@ def _init_zarr_worker_append(
     return worker_ctx
 
 
-# used by write_zarr_recording + ChunkRecordingExecutor
+# used by write_zarr_recording + TimeSeriesChunkExecutor
 def _write_zarr_chunk_append(
     segment_index, start_frame, end_frame, worker_ctx
 ):
