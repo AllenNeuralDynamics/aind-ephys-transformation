@@ -110,12 +110,11 @@ def add_or_append_recording_to_zarr_group(  # noqa: C901
     )
 
     # save probe
-    if "contact_vector" not in zarr_group:
-        if recording.get_property("contact_vector") is not None:
-            probegroup = recording.get_probegroup()
-            zarr_group.attrs["probe"] = check_json(
-                probegroup.to_dict(array_as_list=True)
-            )
+    if recording.has_probe():
+        probegroup = recording.get_probegroup()
+        zarr_group.attrs["probegroup"] = check_json(
+            probegroup.to_dict(array_as_list=True)
+        )
 
     # save time vector if any
     t_starts = np.zeros(recording.get_num_segments(), dtype="float64") * np.nan
