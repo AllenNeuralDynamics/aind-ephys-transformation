@@ -454,7 +454,7 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
             recording_concatenated = si.concatenate_recordings(recording_list)
 
             # set probe
-            recording_concatenated = recording_concatenated.set_probegroup(
+            recording_concatenated.set_probegroup(
                 probe_group, group_mode="by_shank"
             )
             # annotate recording with start and end frames
