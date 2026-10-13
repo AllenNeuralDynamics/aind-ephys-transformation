@@ -1833,7 +1833,7 @@ class TestChronicCompressJob(unittest.TestCase):
         self.chronic_job_ns.job_settings.check_chronic_consecutive_hours = (
             False
         )
-        with self.assertWarns(UserWarning):
+        with self.assertLogs(level="WARNING"):
             # This should not raise an error,
             # but warn about non-consecutive chunks
             list(self.chronic_job_ns._get_read_blocks())
