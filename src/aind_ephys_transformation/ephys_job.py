@@ -28,6 +28,7 @@ import probeinterface as pi
 import spikeinterface as si
 from spikeinterface import extractors as se
 import spikeinterface.preprocessing as spre
+import zarr
 
 from aind_ephys_transformation.models import (
     CompressorName,
@@ -1083,6 +1084,14 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
                     compressor_by_dataset=dict(times=None),
                     **job_kwargs,
                 )
+
+                # SpikeInterface v0.105.0 renamed the probe attribute to
+                # probegroup. For backward-compatibility, we add also the
+                # probe attribute if it doesn't exist.
+                # It's small and inexpensive to duplicate.
+                zarr_root = zarr.open(zarr_path, mode="a")
+                if "probegroup" in zarr_root.attrs:
+                    zarr_root.attrs["probe"] = zarr_root.attrs["probegroup"]
 
     def _compress_raw_data(self) -> None:
         """Compresses ephys data"""
