@@ -1085,6 +1085,7 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
                     **job_kwargs,
                 )
 
+                # TODO: remove once legacy pipelines are dropped
                 # SpikeInterface v0.105.0 renamed the probe attribute to
                 # probegroup. For backward-compatibility, we add also the
                 # probe attribute if it doesn't exist.
