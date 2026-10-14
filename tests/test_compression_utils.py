@@ -83,6 +83,8 @@ class TestCompressionUtils(unittest.TestCase):
             zarr_data["traces_seg0"][self.recording1.get_num_samples():],
             self.recording2.get_traces(),
         )
+        self.recording1.reset_times()
+        self.recording2.reset_times()
 
     def test_append_with_times(self):
         """Test appending recordings with time vectors."""
@@ -112,6 +114,8 @@ class TestCompressionUtils(unittest.TestCase):
                 ]
             ),
         )
+        self.recording1.reset_times()
+        self.recording2.reset_times()
 
     def test_write_with_t_start(self):
         """Test writing a recording with t_start."""
@@ -130,6 +134,7 @@ class TestCompressionUtils(unittest.TestCase):
         # Verify t_start is saved correctly
         zarr_data = zarr.open(temp_zarr_path, mode="r")
         np.testing.assert_array_equal(zarr_data["t_starts"], np.array([50.0]))
+        self.recording1.reset_times()
 
     def test_raise_with_multi_segment_recording(self):
         """Test that an error is raised for multi-segment recordings."""

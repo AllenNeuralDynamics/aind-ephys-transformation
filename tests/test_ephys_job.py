@@ -8,11 +8,12 @@ from datetime import datetime
 from pathlib import Path
 from unittest.mock import MagicMock, call, patch
 import numpy as np
+import zarr
 
 from numcodecs import Blosc
 from wavpack_numcodecs import WavPack
 
-from spikeinterface import load
+from spikeinterface import generate_recording, load
 from spikeinterface.extractors import (
     read_openephys,
     get_neo_num_blocks,
@@ -1123,6 +1124,52 @@ class TestEphysJob(unittest.TestCase):
         )
         mock_bin_save.assert_not_called()
 
+    def test_compress_and_write_probe_attrs(self):
+        """Tests _compress_and_write_block writes both 'probegroup' and the
+        legacy 'probe' attributes to the zarr root"""
+        rec_probe = generate_recording(
+            num_channels=4, durations=[0.1], set_probe=True
+        )
+        rec_no_probe = generate_recording(
+            num_channels=4, durations=[0.1], set_probe=False
+        )
+        read_blocks = [
+            {
+                "recording": rec_probe,
+                "experiment_name": "experiment1",
+                "stream_name": "with_probe",
+            },
+            {
+                "recording": rec_no_probe,
+                "experiment_name": "experiment1",
+                "stream_name": "no_probe",
+            },
+        ]
+        output_dir = self.test_dir_path / "output_dir_probe_attrs"
+        self.basic_job._compress_and_write_block(
+            read_blocks=read_blocks,
+            compressor=self.basic_job._get_compressor(),
+            max_windows_filename_len=(
+                self.basic_job.job_settings.compress_max_windows_filename_len
+            ),
+            output_dir=output_dir,
+            output_format="zarr",
+            job_kwargs={"n_jobs": 1},
+        )
+
+        root_probe = zarr.open(
+            output_dir / "experiment1_with_probe.zarr", mode="r"
+        )
+        self.assertIn("probegroup", root_probe.attrs)
+        self.assertEqual(
+            root_probe.attrs["probegroup"], root_probe.attrs["probe"]
+        )
+        root_no_probe = zarr.open(
+            output_dir / "experiment1_no_probe.zarr", mode="r"
+        )
+        self.assertNotIn("probegroup", root_no_probe.attrs)
+        self.assertNotIn("probe", root_no_probe.attrs)
+
     @patch("warnings.warn")
     @patch(
         "aind_ephys_transformation.ephys_job.EphysCompressionJob"
@@ -1833,7 +1880,7 @@ class TestChronicCompressJob(unittest.TestCase):
         self.chronic_job_ns.job_settings.check_chronic_consecutive_hours = (
             False
         )
-        with self.assertWarns(UserWarning):
+        with self.assertLogs(level="WARNING"):
             # This should not raise an error,
             # but warn about non-consecutive chunks
             list(self.chronic_job_ns._get_read_blocks())
