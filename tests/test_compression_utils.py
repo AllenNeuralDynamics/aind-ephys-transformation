@@ -149,3 +149,22 @@ class TestCompressionUtils(unittest.TestCase):
             write_or_append_recording_to_zarr(
                 recording_multi_segment, temp_zarr_path, n_jobs=2
             )
+
+    def test_append_with_shards(self):
+        """Test appending to a sharded zarr file keeps data and shards."""
+        temp_zarr_path = self.tmp_path / "test_shards.zarr"
+        write_or_append_recording_to_zarr(
+            self.recording1, temp_zarr_path, shard_factor=3, n_jobs=2
+        )
+        write_or_append_recording_to_zarr(
+            self.recording2, temp_zarr_path, shard_factor=3, n_jobs=2
+        )
+
+        traces = zarr.open(str(temp_zarr_path), mode="r")["traces_seg0"]
+        assert traces.shards == (traces.chunks[0] * 3, traces.chunks[1])
+        np.testing.assert_array_equal(
+            traces[:],
+            np.concatenate(
+                [self.recording1.get_traces(), self.recording2.get_traces()]
+            ),
+        )
