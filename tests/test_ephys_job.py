@@ -645,6 +645,7 @@ class TestEphysJob(unittest.TestCase):
                         shaping_weight=0.0,
                     ),
                     compressor_by_dataset={"times": None},
+                    shard_factor=30,
                     n_jobs=1,
                 ),
                 call(
@@ -666,6 +667,7 @@ class TestEphysJob(unittest.TestCase):
                         shaping_weight=0.0,
                     ),
                     compressor_by_dataset={"times": None},
+                    shard_factor=30,
                     n_jobs=1,
                 ),
                 call(
@@ -687,6 +689,7 @@ class TestEphysJob(unittest.TestCase):
                         shaping_weight=0.0,
                     ),
                     compressor_by_dataset={"times": None},
+                    shard_factor=30,
                     n_jobs=1,
                 ),
             ]
@@ -712,6 +715,7 @@ class TestEphysJob(unittest.TestCase):
                         shaping_weight=0.0,
                     ),
                     compressor_by_dataset={"times": None},
+                    shard_factor=30,
                     n_jobs=1,
                 ),
                 call(
@@ -733,6 +737,7 @@ class TestEphysJob(unittest.TestCase):
                         shaping_weight=0.0,
                     ),
                     compressor_by_dataset={"times": None},
+                    shard_factor=30,
                     n_jobs=1,
                 ),
                 call(
@@ -754,6 +759,7 @@ class TestEphysJob(unittest.TestCase):
                         shaping_weight=0.0,
                     ),
                     compressor_by_dataset={"times": None},
+                    shard_factor=30,
                     n_jobs=1,
                 ),
                 call(
@@ -775,6 +781,7 @@ class TestEphysJob(unittest.TestCase):
                         shaping_weight=0.0,
                     ),
                     compressor_by_dataset={"times": None},
+                    shard_factor=30,
                     n_jobs=1,
                 ),
                 call(
@@ -796,6 +803,7 @@ class TestEphysJob(unittest.TestCase):
                         shaping_weight=0.0,
                     ),
                     compressor_by_dataset={"times": None},
+                    shard_factor=30,
                     n_jobs=1,
                 ),
                 call(
@@ -817,6 +825,7 @@ class TestEphysJob(unittest.TestCase):
                         shaping_weight=0.0,
                     ),
                     compressor_by_dataset={"times": None},
+                    shard_factor=30,
                     n_jobs=1,
                 ),
             ]
@@ -874,6 +883,7 @@ class TestEphysJob(unittest.TestCase):
                         shaping_weight=0.0,
                     ),
                     compressor_by_dataset={"times": None},
+                    shard_factor=30,
                     n_jobs=1,
                 ),
                 call(
@@ -895,6 +905,7 @@ class TestEphysJob(unittest.TestCase):
                         shaping_weight=0.0,
                     ),
                     compressor_by_dataset={"times": None},
+                    shard_factor=30,
                     n_jobs=1,
                 ),
                 call(
@@ -916,6 +927,7 @@ class TestEphysJob(unittest.TestCase):
                         shaping_weight=0.0,
                     ),
                     compressor_by_dataset={"times": None},
+                    shard_factor=30,
                     n_jobs=1,
                 ),
                 call(
@@ -937,6 +949,7 @@ class TestEphysJob(unittest.TestCase):
                         shaping_weight=0.0,
                     ),
                     compressor_by_dataset={"times": None},
+                    shard_factor=30,
                     n_jobs=1,
                 ),
                 call(
@@ -958,6 +971,7 @@ class TestEphysJob(unittest.TestCase):
                         shaping_weight=0.0,
                     ),
                     compressor_by_dataset={"times": None},
+                    shard_factor=30,
                     n_jobs=1,
                 ),
                 call(
@@ -979,6 +993,7 @@ class TestEphysJob(unittest.TestCase):
                         shaping_weight=0.0,
                     ),
                     compressor_by_dataset={"times": None},
+                    shard_factor=30,
                     n_jobs=1,
                 ),
                 call(
@@ -1000,6 +1015,7 @@ class TestEphysJob(unittest.TestCase):
                         shaping_weight=0.0,
                     ),
                     compressor_by_dataset={"times": None},
+                    shard_factor=30,
                     n_jobs=1,
                 ),
                 call(
@@ -1021,6 +1037,7 @@ class TestEphysJob(unittest.TestCase):
                         shaping_weight=0.0,
                     ),
                     compressor_by_dataset={"times": None},
+                    shard_factor=30,
                     n_jobs=1,
                 ),
                 call(
@@ -1042,6 +1059,7 @@ class TestEphysJob(unittest.TestCase):
                         shaping_weight=0.0,
                     ),
                     compressor_by_dataset={"times": None},
+                    shard_factor=30,
                     n_jobs=1,
                 ),
             ],

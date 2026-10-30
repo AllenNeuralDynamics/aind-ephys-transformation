@@ -21,7 +21,7 @@ dependencies = [
     # 'spikeinterface[full]>=0.106.0',
     'spikeinterface[full] @ git+https://github.com/samuelgarcia/spikeinterface.git@b4e4bedc37bfe8953baf66ed61ab11ccc8b3e98c',
     'probeinterface>=0.4.1',
-    'wavpack-numcodecs>=0.3.0',
+    'wavpack-numcodecs>=0.3.1',
     's3fs',
     'python-json-logger',
     'PyYAML',
