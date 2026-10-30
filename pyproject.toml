@@ -24,7 +24,8 @@ dependencies = [
     'wavpack-numcodecs>=0.3.0',
     's3fs',
     'python-json-logger',
-    'PyYAML'
+    'PyYAML',
+    'pandas'
 ]
 
 [project.optional-dependencies]
