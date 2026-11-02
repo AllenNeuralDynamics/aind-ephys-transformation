@@ -222,7 +222,8 @@ def add_or_append_traces_to_zarr(
     num_frames = recording.get_num_samples(segment_index)
     num_channels = recording.get_num_channels()
     dset_name = dataset_paths[segment_index]
-    shape = (num_frames, num_channels)
+    # zarr v3 silently drops out-of-bounds writes: size to the global end
+    shape = (global_start_frame + num_frames, num_channels)
     if dset_name in zarr_group:
         dset = zarr_group[dset_name]
         # when appending, the on-disk chunks/shards dictate the job layout
@@ -270,7 +271,7 @@ def add_or_append_traces_to_zarr(
             )
             timestamps_dset = zarr_group.create_array(
                 name=timestamps_dset_name,
-                shape=(num_frames,),
+                shape=(global_start_frame + num_frames,),
                 chunks=(chunks[0],),
                 shards=(shards[0],) if shards is not None else None,
                 dtype="float64",

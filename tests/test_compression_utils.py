@@ -168,3 +168,17 @@ class TestCompressionUtils(unittest.TestCase):
                 [self.recording1.get_traces(), self.recording2.get_traces()]
             ),
         )
+
+    def test_write_new_recording_with_offset(self):
+        """Test a first write that does not start at session sample 0."""
+        temp_zarr_path = self.tmp_path / "test_offset.zarr"
+        write_or_append_recording_to_zarr(
+            self.recording2, temp_zarr_path, shard_factor=3, n_jobs=2
+        )
+
+        start = self.recording1.get_num_samples()
+        traces = zarr.open(str(temp_zarr_path), mode="r")["traces_seg0"]
+        assert traces.shape[0] == start + self.recording2.get_num_samples()
+        np.testing.assert_array_equal(
+            traces[start:], self.recording2.get_traces()
+        )
