@@ -222,7 +222,6 @@ def add_or_append_traces_to_zarr(
     num_frames = recording.get_num_samples(segment_index)
     num_channels = recording.get_num_channels()
     dset_name = dataset_paths[segment_index]
-    # zarr v3 silently drops out-of-bounds writes: size to the global end
     shape = (global_start_frame + num_frames, num_channels)
     if dset_name in zarr_group:
         dset = zarr_group[dset_name]
