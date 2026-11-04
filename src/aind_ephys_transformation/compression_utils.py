@@ -206,7 +206,7 @@ def add_or_append_traces_to_zarr(
     num_frames = recording.get_num_samples(segment_index)
     num_channels = recording.get_num_channels()
     dset_name = dataset_paths[segment_index]
-    shape = (num_frames, num_channels)
+    shape = (global_start_frame + num_frames, num_channels)
     if dset_name in zarr_group:
         dset = zarr_group[dset_name]
         if dset.shape[0] < global_start_frame + num_frames:
@@ -232,7 +232,7 @@ def add_or_append_traces_to_zarr(
         else:
             timestamps_dset = zarr_group.create_dataset(
                 name=timestamps_dset_name,
-                shape=(num_frames,),
+                shape=(global_start_frame + num_frames,),
                 chunks=(chunk_size,),
                 dtype="float64",
                 filters=filters_times,
