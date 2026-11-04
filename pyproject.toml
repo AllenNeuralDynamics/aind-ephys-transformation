@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "aind-ephys-transformation"
 description = "Repository to manage transformation of ephys data"
 license = {text = "MIT"}
-requires-python = ">=3.9"
+requires-python = ">=3.11"
 authors = [
     {name = "Allen Institute for Neural Dynamics"}
 ]
@@ -18,14 +18,13 @@ dynamic = ["version"]
 
 dependencies = [
     'aind-data-transformation>=0.0.18',
-    'spikeinterface[full]>=0.105.3',
+    # 'spikeinterface[full]>=0.106.0',
+    'spikeinterface[full] @ git+https://github.com/samuelgarcia/spikeinterface.git@b4e4bedc37bfe8953baf66ed61ab11ccc8b3e98c',
     'probeinterface>=0.4.1',
-    'neo>=0.14.5',
-    'wavpack-numcodecs==0.2.2; python_version<"3.13"',
-    'wavpack-numcodecs>=0.2.3; python_version>="3.13"',
+    'wavpack-numcodecs>=0.3.1',
     's3fs',
     'python-json-logger',
-    'PyYAML'
+    'PyYAML',
 ]
 
 [project.optional-dependencies]
@@ -47,7 +46,7 @@ version = {attr = "aind_ephys_transformation.__version__"}
 
 [tool.black]
 line-length = 79
-target_version = ['py39']
+target_version = ['py311']
 exclude = '''
 
 (
