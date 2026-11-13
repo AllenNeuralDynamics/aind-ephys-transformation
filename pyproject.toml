@@ -18,10 +18,9 @@ dynamic = ["version"]
 
 dependencies = [
     'aind-data-transformation>=0.0.18',
-    # 'spikeinterface[full]>=0.106.0',
-    'spikeinterface[full] @ git+https://github.com/samuelgarcia/spikeinterface.git@b4e4bedc37bfe8953baf66ed61ab11ccc8b3e98c',
-    'probeinterface>=0.4.1',
-    'wavpack-numcodecs>=0.3.1',
+    'spikeinterface[full]>=0.106.0',
+    'probeinterface>=0.5.0',
+    'wavpack-numcodecs>=0.3.2',
     's3fs',
     'python-json-logger',
     'PyYAML',
