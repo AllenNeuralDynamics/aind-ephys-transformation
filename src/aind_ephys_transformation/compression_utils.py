@@ -8,6 +8,10 @@ import zarr
 from spikeinterface import BaseRecording
 from spikeinterface.core.core_tools import check_json
 from spikeinterface.core.job_tools import split_job_kwargs
+from spikeinterface.core.zarr_tools import (
+    build_codec_pipeline,
+    adjust_chunks_shards_and_job_kwargs,
+)
 from spikeinterface.core.zarrextractors import (
     get_default_zarr_compressor,
     add_properties_and_annotations,
@@ -47,7 +51,7 @@ def write_or_append_recording_to_zarr(
 
 def add_or_append_recording_to_zarr_group(  # noqa: C901
     recording: BaseRecording,
-    zarr_group: zarr.hierarchy.Group,
+    zarr_group: zarr.Group,
     verbose=False,
     dtype=None,
     global_start_frame=0,
@@ -75,6 +79,9 @@ def add_or_append_recording_to_zarr_group(  # noqa: C901
 
     dtype = recording.get_dtype() if dtype is None else dtype
     channel_chunk_size = zarr_kwargs.get("channel_chunk_size", None)
+    shards = zarr_kwargs.get("shards", None)
+    shard_factor = zarr_kwargs.get("shard_factor", None)
+    buffer_megabytes = zarr_kwargs.get("buffer_megabytes", 500)
     global_compressor = zarr_kwargs.pop(
         "compressor", get_default_zarr_compressor()
     )
@@ -83,10 +90,14 @@ def add_or_append_recording_to_zarr_group(  # noqa: C901
     filters_by_dataset = zarr_kwargs.pop("filters_by_dataset", {})
 
     if "channel_ids" not in zarr_group:
-        zarr_group.create_dataset(
+        # variable-length UTF-8 is the stable zarr v3 spec for strings
+        channel_ids = recording.get_channel_ids()
+        if channel_ids.dtype.kind in ("U", "S"):
+            channel_ids = channel_ids.astype("T")
+        zarr_group.create_array(
             name="channel_ids",
-            data=recording.get_channel_ids(),
-            compressor=None,
+            data=channel_ids,
+            compressors=None,
         )
 
     compressor_traces = compressor_by_dataset.get("traces", global_compressor)
@@ -104,6 +115,9 @@ def add_or_append_recording_to_zarr_group(  # noqa: C901
         filters_times=filters_times,
         dtype=dtype,
         channel_chunk_size=channel_chunk_size,
+        shards=shards,
+        shard_factor=shard_factor,
+        buffer_megabytes=buffer_megabytes,
         global_start_frame=global_start_frame,
         verbose=verbose,
         **job_kwargs,
@@ -124,8 +138,8 @@ def add_or_append_recording_to_zarr_group(  # noqa: C901
             t_starts[segment_index] = d["t_start"]
 
     if np.any(~np.isnan(t_starts)) and "t_starts" not in zarr_group:
-        zarr_group.create_dataset(
-            name="t_starts", data=t_starts, compressor=None
+        zarr_group.create_array(
+            name="t_starts", data=t_starts, compressors=None
         )
 
     if "properties" not in zarr_group:
@@ -147,6 +161,9 @@ def add_or_append_traces_to_zarr(
     dataset_paths,
     dataset_timestamps_paths=None,
     channel_chunk_size=None,
+    shards=None,
+    shard_factor=None,
+    buffer_megabytes=500,
     dtype=None,
     compressor_traces=None,
     filters_traces=None,
@@ -169,6 +186,12 @@ def add_or_append_traces_to_zarr(
         List of paths to traces datasets in the zarr group
     channel_chunk_size : int or None, default: None (chunking in time only)
         Channels per chunk
+    shards : tuple or None, default: None
+        Shard shape for the traces dataset (ignored when appending)
+    shard_factor : int or None, default: None
+        Number of chunks per shard in time (ignored when appending)
+    buffer_megabytes : int, default: 500
+        Buffer size in megabytes for writing data to zarr (per worker)
     dtype : dtype, default: None
         Type of the saved data
     compressor_traces : zarr compressor or None, default: None
@@ -186,17 +209,15 @@ def add_or_append_traces_to_zarr(
     {}
     """
     from spikeinterface.core.job_tools import (
-        ensure_chunk_size,
         fix_job_kwargs,
         TimeSeriesChunkExecutor,
     )
 
     assert dataset_paths is not None, "Provide 'file_path'"
 
-    dtype = recording.get_dtype()
+    dtype = recording.get_dtype() if dtype is None else dtype
 
     job_kwargs = fix_job_kwargs(job_kwargs)
-    chunk_size = ensure_chunk_size(recording, **job_kwargs)
 
     # only 1 segment supported
     segment_index = 0
@@ -209,16 +230,35 @@ def add_or_append_traces_to_zarr(
     shape = (global_start_frame + num_frames, num_channels)
     if dset_name in zarr_group:
         dset = zarr_group[dset_name]
+        # when appending, the on-disk chunks/shards dictate the job layout
+        chunks, shards, job_kwargs = adjust_chunks_shards_and_job_kwargs(
+            chunks=dset.chunks,
+            shards=dset.shards,
+            job_kwargs=job_kwargs,
+            time_series=recording,
+        )
         if dset.shape[0] < global_start_frame + num_frames:
             dset.resize((global_start_frame + num_frames, num_channels))
     else:
-        dset = zarr_group.create_dataset(
+        chunks, shards, job_kwargs = adjust_chunks_shards_and_job_kwargs(
+            extra_chunks=(
+                (channel_chunk_size,)
+                if channel_chunk_size is not None
+                else None
+            ),
+            shards=shards,
+            shard_factor=shard_factor,
+            job_kwargs=job_kwargs,
+            time_series=recording,
+        )
+        codec_kwargs = build_codec_pipeline(filters_traces, compressor_traces)
+        dset = zarr_group.create_array(
             name=dset_name,
             shape=shape,
-            chunks=(chunk_size, channel_chunk_size),
+            chunks=chunks,
+            shards=shards,
             dtype=dtype,
-            filters=filters_traces,
-            compressor=compressor_traces,
+            **codec_kwargs,
         )
     zarr_datasets.append(dset)
 
@@ -227,16 +267,19 @@ def add_or_append_traces_to_zarr(
         timestamps_dset_name = dataset_timestamps_paths[segment_index]
         if timestamps_dset_name in zarr_group:
             timestamps_dset = zarr_group[timestamps_dset_name]
-            if len(timestamps_dset) < global_start_frame + num_frames:
+            if timestamps_dset.shape[0] < global_start_frame + num_frames:
                 timestamps_dset.resize((global_start_frame + num_frames,))
         else:
-            timestamps_dset = zarr_group.create_dataset(
+            codec_kwargs = build_codec_pipeline(
+                filters_times, compressor_times
+            )
+            timestamps_dset = zarr_group.create_array(
                 name=timestamps_dset_name,
                 shape=(global_start_frame + num_frames,),
-                chunks=(chunk_size,),
+                chunks=(chunks[0],),
+                shards=(shards[0],) if shards is not None else None,
                 dtype="float64",
-                filters=filters_times,
-                compressor=compressor_times,
+                **codec_kwargs,
             )
         zarr_timestamps_datasets.append(timestamps_dset)
 
@@ -249,6 +292,7 @@ def add_or_append_traces_to_zarr(
         zarr_timestamps_datasets,
         dtype,
         global_start_frame,
+        buffer_megabytes,
     )
     executor = TimeSeriesChunkExecutor(
         recording,
@@ -259,14 +303,19 @@ def add_or_append_traces_to_zarr(
         job_name="write_zarr_recording",
         **job_kwargs,
     )
+    # align jobs to shards (the unit of write) so no two jobs share a shard
     slices = get_slices_aligned_to_zarr_chunks(
-        recording, chunk_size, global_start_frame
+        recording,
+        shards[0] if shards is not None else chunks[0],
+        global_start_frame,
     )
     executor.run(slices=slices)
 
 
 def get_slices_aligned_to_zarr_chunks(
-    recording: BaseRecording, chunk_size: int, global_start_frame: int = 0
+    recording: BaseRecording,
+    chunk_size: int,
+    global_start_frame: int = 0,
 ):
     """
     This function returns a list of tuples representing slices of the recording
@@ -294,9 +343,12 @@ def get_slices_aligned_to_zarr_chunks(
     from spikeinterface.core.job_tools import divide_segment_into_chunks
 
     segment_index = 0
-    first_chunk_size = chunk_size - global_start_frame % chunk_size
+    num_samples = recording.get_num_samples(segment_index)
+    first_chunk_size = min(
+        chunk_size - global_start_frame % chunk_size, num_samples
+    )
     slices = [(segment_index, 0, first_chunk_size)]
-    num_frames = recording.get_num_samples(segment_index) - first_chunk_size
+    num_frames = num_samples - first_chunk_size
     chunks = divide_segment_into_chunks(num_frames, chunk_size)
     slices.extend(
         [
@@ -318,6 +370,7 @@ def _init_zarr_worker_append(
     zarr_timestamps_datasets,
     dtype,
     global_start_frame,
+    buffer_megabytes,
 ):
     """Initialize the worker context for appending to Zarr."""
 
@@ -328,6 +381,7 @@ def _init_zarr_worker_append(
     worker_ctx["zarr_timestamps_datasets"] = zarr_timestamps_datasets
     worker_ctx["dtype"] = np.dtype(dtype)
     worker_ctx["global_start_frame"] = global_start_frame
+    worker_ctx["buffer_megabytes"] = buffer_megabytes
 
     return worker_ctx
 
@@ -349,14 +403,41 @@ def _write_zarr_chunk_append(
     start_frame_global = start_frame + global_start_frame
     end_frame_global = end_frame + global_start_frame
 
-    # apply function
-    traces = recording.get_traces(
-        start_frame=start_frame,
-        end_frame=end_frame,
-        segment_index=segment_index,
+    # With shards, a job covers a whole shard so only one worker writes to it.
+    # Traces are computed one zarr chunk at a time to keep the memory of the
+    # chain small, and written as many whole chunks at a time as fit in
+    # buffer_megabytes, since zarr reads and rewrites the whole shard on every
+    # write. Boundaries are aligned to chunks in the global (on-disk) frame.
+    chunk_size = zarr_dataset.chunks[0]
+    bytes_per_chunk = (
+        chunk_size * int(np.prod(zarr_dataset.shape[1:])) * dtype.itemsize
     )
-    traces = traces.astype(dtype)
-    zarr_dataset[start_frame_global:end_frame_global, :] = traces
+    write_size = chunk_size * max(
+        1, worker_ctx["buffer_megabytes"] * 1_000_000 // bytes_per_chunk
+    )
+    write_start = start_frame_global
+    while write_start < end_frame_global:
+        write_end = min(
+            (write_start // write_size + 1) * write_size, end_frame_global
+        )
+        traces = np.empty(
+            (write_end - write_start,) + zarr_dataset.shape[1:], dtype=dtype
+        )
+        read_start = write_start
+        while read_start < write_end:
+            read_end = min(
+                (read_start // chunk_size + 1) * chunk_size, write_end
+            )
+            traces[read_start - write_start:read_end - write_start] = (
+                recording.get_traces(
+                    start_frame=read_start - global_start_frame,
+                    end_frame=read_end - global_start_frame,
+                    segment_index=segment_index,
+                )
+            )
+            read_start = read_end
+        zarr_dataset[write_start:write_end, :] = traces
+        write_start = write_end
 
     if len(zarr_timestamps_datasets) > 0:
         zarr_timestamps_dataset = zarr_timestamps_datasets[segment_index]
@@ -367,5 +448,4 @@ def _write_zarr_chunk_append(
         del timestamps
 
     # fix memory leak by forcing garbage collection
-    del traces
     gc.collect()
