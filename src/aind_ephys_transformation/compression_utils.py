@@ -428,7 +428,7 @@ def _write_zarr_chunk_append(
             read_end = min(
                 (read_start // chunk_size + 1) * chunk_size, write_end
             )
-            traces[read_start - write_start : read_end - write_start] = (
+            traces[read_start - write_start:read_end - write_start] = (
                 recording.get_traces(
                     start_frame=read_start - global_start_frame,
                     end_frame=read_end - global_start_frame,
