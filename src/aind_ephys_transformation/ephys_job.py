@@ -168,6 +168,16 @@ class EphysJobSettings(BasicJobSettings):
         title="Shard Factor",
         ge=1,
     )
+    buffer_megabytes: int = Field(
+        default=500,
+        description=(
+            "Per-worker buffer size in megabytes for writing data to zarr. "
+            "Shards are computed one chunk at a time and written in groups "
+            "of chunks that fit in this buffer."
+        ),
+        title="Buffer Megabytes",
+        ge=0,
+    )
     # Scale settings
     scale_num_chunks_per_segment: int = Field(
         default=100,
@@ -1078,6 +1088,7 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
                     compressor_by_dataset=compressor_by_dataset,
                     annotations_to_update=["start_end_frames"],
                     shard_factor=self.job_settings.shard_factor,
+                    buffer_megabytes=self.job_settings.buffer_megabytes,
                     **job_kwargs,
                 )
             else:
@@ -1090,6 +1101,7 @@ class EphysCompressionJob(GenericEtl[EphysJobSettings]):
                     compressor=compressor,
                     compressor_by_dataset=dict(times=None),
                     shard_factor=self.job_settings.shard_factor,
+                    buffer_megabytes=self.job_settings.buffer_megabytes,
                     **job_kwargs,
                 )
 

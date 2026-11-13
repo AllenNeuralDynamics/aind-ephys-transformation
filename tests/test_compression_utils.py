@@ -182,3 +182,21 @@ class TestCompressionUtils(unittest.TestCase):
         np.testing.assert_array_equal(
             traces[start:], self.recording2.get_traces()
         )
+
+    def test_write_with_offset_and_small_buffer(self):
+        """Test shards written over several buffered writes, with offset."""
+        temp_zarr_path = self.tmp_path / "test_offset_buffer.zarr"
+        # 0 MB -> one chunk per write, so each shard takes several writes
+        write_or_append_recording_to_zarr(
+            self.recording2,
+            temp_zarr_path,
+            shard_factor=3,
+            buffer_megabytes=0,
+            n_jobs=2,
+        )
+
+        start = self.recording1.get_num_samples()
+        traces = zarr.open(str(temp_zarr_path), mode="r")["traces_seg0"]
+        np.testing.assert_array_equal(
+            traces[start:], self.recording2.get_traces()
+        )
